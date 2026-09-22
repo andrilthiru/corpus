@@ -123,7 +123,9 @@ function getMatchingDocs(docs, query) {
   const q = normalizeTamilText(query).trim().toLocaleLowerCase();
   if (!q) return docs;
 
-  return docs.filter((d) => normalizeTamilText(d.text || "").toLocaleLowerCase().includes(q));
+  return docs.filter((d) =>
+    normalizeTamilText(d.text || "").toLocaleLowerCase().includes(q)
+  );
 }
 
 function countOccurrences(text = "", query = "") {
@@ -146,6 +148,22 @@ function countOccurrences(text = "", query = "") {
 
 function topicLabel(doc) {
   return doc.topic || doc.subject || "Unspecified";
+}
+
+function updateAnalyzeMode(query) {
+  const q = normalizeTamilText(query).trim();
+
+  if (q) {
+    $("analyzeModeBanner").innerHTML = `
+      <strong>Term View</strong>
+      <span>Analyzing <span class="tamil">“${escapeHtml(q)}”</span> within ${escapeHtml(levelLabel(analyzeLevel))}.</span>
+    `;
+  } else {
+    $("analyzeModeBanner").innerHTML = `
+      <strong>Corpus View</strong>
+      <span>Showing ${escapeHtml(levelLabel(analyzeLevel))} as a whole.</span>
+    `;
+  }
 }
 
 function renderTermSummary(docs, query) {
@@ -236,7 +254,11 @@ function renderKwicTool(docs, query) {
   const q = normalizeTamilText(query).trim();
 
   if (!q) {
-    return '<div class="empty">Enter a Tamil word or phrase above to generate concordance lines.</div>';
+    return `
+      <div class="require-search">
+        <strong>Search term required</strong>
+        <span>Enter a word or phrase above to see every occurrence in context.</span>
+      </div>`;
   }
 
   const rows = [];
@@ -280,16 +302,61 @@ function renderKwicTool(docs, query) {
 }
 
 function renderWordlistTool(docs, query) {
-  const matching = query ? getMatchingDocs(docs, query) : docs;
   const counts = {};
   let total = 0;
 
-  matching.forEach((d) => {
+  docs.forEach((d) => {
     tokenize(d.text || "").forEach((word) => {
       counts[word] = (counts[word] || 0) + 1;
       total += 1;
     });
   });
+
+  const q = normalizeTamilText(query).trim();
+
+  if (q) {
+    const qLower = q.toLocaleLowerCase();
+
+    const matchingForms = Object.entries(counts)
+      .filter(([word]) => word.toLocaleLowerCase() === qLower)
+      .sort((a, b) => b[1] - a[1]);
+
+    const exactFrequency = matchingForms.reduce((sum, [, count]) => sum + count, 0);
+    const percentage = total ? (exactFrequency / total) * 100 : 0;
+    const perThousand = total ? (exactFrequency / total) * 1000 : 0;
+
+    if (!matchingForms.length) {
+      return `
+        <h3>Wordlist result</h3>
+        <div class="empty">The exact word <span class="tamil">“${escapeHtml(q)}”</span> does not appear as a standalone word in the selected corpus.</div>
+      `;
+    }
+
+    return `
+      <h3>Wordlist result</h3>
+      <div class="small">Exact standalone word frequency within ${escapeHtml(levelLabel(analyzeLevel))}.</div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Word</th>
+              <th>Frequency</th>
+              <th>% of selected corpus</th>
+              <th>Per 1,000 words</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="tamil">${escapeHtml(q)}</td>
+              <td>${exactFrequency}</td>
+              <td>${percentage.toFixed(2)}%</td>
+              <td>${perThousand.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
 
   const rows = Object.entries(counts)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ta"))
@@ -298,12 +365,12 @@ function renderWordlistTool(docs, query) {
   if (!rows.length) return '<div class="empty">No words available for this selection.</div>';
 
   return `
-    <h3>${query ? `Wordlist — texts containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Wordlist"}</h3>
-    <div class="small">${Object.keys(counts).length} unique word forms · ${total.toLocaleString()} total words in this subset</div>
+    <h3>Wordlist</h3>
+    <div class="small">${Object.keys(counts).length} unique word forms · ${total.toLocaleString()} total words</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>#</th><th>Word</th><th>Frequency</th><th>% of subset</th></tr>
+          <tr><th>#</th><th>Word</th><th>Frequency</th><th>% of selected corpus</th><th>Per 1,000 words</th></tr>
         </thead>
         <tbody>
           ${rows.map(([word, count], i) => `
@@ -312,6 +379,7 @@ function renderWordlistTool(docs, query) {
               <td class="tamil">${escapeHtml(word)}</td>
               <td>${count}</td>
               <td>${total ? ((count / total) * 100).toFixed(2) : "0.00"}%</td>
+              <td>${total ? ((count / total) * 1000).toFixed(2) : "0.00"}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -321,11 +389,10 @@ function renderWordlistTool(docs, query) {
 }
 
 function renderNgramsTool(docs, query) {
-  const matching = query ? getMatchingDocs(docs, query) : docs;
   const counts = {};
   const q = normalizeTamilText(query).trim().toLocaleLowerCase();
 
-  matching.forEach((d) => {
+  docs.forEach((d) => {
     const words = tokenize(d.text || "");
 
     for (let i = 0; i < words.length - 1; i += 1) {
@@ -349,12 +416,12 @@ function renderNgramsTool(docs, query) {
 
   if (!rows.length) {
     return query
-      ? `<div class="empty">No 2-word or 3-word N-grams containing “<span class="tamil">${escapeHtml(query)}</span>” were found.</div>`
+      ? `<div class="empty">No 2-word or 3-word N-grams containing <span class="tamil">“${escapeHtml(query)}”</span> were found.</div>`
       : '<div class="empty">Not enough text to calculate N-grams.</div>';
   }
 
   return `
-    <h3>${query ? `N-grams containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Frequent N-grams"}</h3>
+    <h3>${query ? `N-grams containing <span class="tamil">“${escapeHtml(query)}”</span>` : "Frequent N-grams"}</h3>
     <div class="small">Consecutive 2-word and 3-word sequences.</div>
     <div class="table-wrap">
       <table class="table">
@@ -377,7 +444,11 @@ function renderCollocationsTool(docs, query) {
   const q = normalizeTamilText(query).trim();
 
   if (!q) {
-    return '<div class="empty">Enter a Tamil word or phrase to see words occurring near it.</div>';
+    return `
+      <div class="require-search">
+        <strong>Search term required</strong>
+        <span>Enter a word or phrase above to identify words that frequently occur near it.</span>
+      </div>`;
   }
 
   const qLower = q.toLocaleLowerCase();
@@ -406,11 +477,11 @@ function renderCollocationsTool(docs, query) {
     .slice(0, 100);
 
   if (!rows.length) {
-    return `<div class="empty">No collocates found around “<span class="tamil">${escapeHtml(q)}</span>”.</div>`;
+    return `<div class="empty">No collocates found around <span class="tamil">“${escapeHtml(q)}”</span>.</div>`;
   }
 
   return `
-    <h3>Collocations around “<span class="tamil">${escapeHtml(q)}</span>”</h3>
+    <h3>Collocations around <span class="tamil">“${escapeHtml(q)}”</span></h3>
     <div class="small">Words occurring within 5 words before or after the search term.</div>
     <div class="table-wrap">
       <table class="table">
@@ -472,12 +543,12 @@ function renderAnnotationsTool(docs, query) {
 
   if (!rows.length) {
     return query
-      ? `<div class="empty">No annotations are available in texts containing “<span class="tamil">${escapeHtml(query)}</span>”.</div>`
+      ? `<div class="empty">No annotations are available in texts containing <span class="tamil">“${escapeHtml(query)}”</span>.</div>`
       : '<div class="empty">No annotations are available for this selection yet.</div>';
   }
 
   return `
-    <div class="small">${rows.length} annotation(s) in ${matching.length} matching text(s)</div>
+    <div class="small">${rows.length} annotation(s) in ${matching.length} text(s)</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
@@ -534,7 +605,7 @@ function renderTextTypeTool(docs, query) {
   if (!rows.length) return '<div class="empty">No text-type metadata available.</div>';
 
   return `
-    <h3>${query ? `Text types containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Text Type Analysis"}</h3>
+    <h3>${query ? `Text types containing <span class="tamil">“${escapeHtml(query)}”</span>` : "Text Type Analysis"}</h3>
     <div class="table-wrap">
       <table class="table">
         <thead>
@@ -568,6 +639,7 @@ function renderAnalyze() {
   const docs = docsFor(analyzeLevel);
   const query = $("analyzeSearch").value.trim();
 
+  updateAnalyzeMode(query);
   renderTermSummary(docs, query);
 
   let html = "";

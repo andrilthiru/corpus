@@ -36,10 +36,10 @@
       </div>
 
       <div class="stats-grid">
-        <div class="card"><span>Learner texts</span><strong id="statDocs">0</strong></div>
-        <div class="card"><span>Total words</span><strong id="statWords">0</strong></div>
-        <div class="card"><span>Annotations</span><strong id="statAnnotations">0</strong></div>
-        <div class="card"><span>Levels represented</span><strong id="statLevels">0</strong></div>
+        <div class="card centered-card"><span>Learner texts</span><strong id="statDocs">0</strong></div>
+        <div class="card centered-card"><span>Total words</span><strong id="statWords">0</strong></div>
+        <div class="card centered-card"><span>Annotations</span><strong id="statAnnotations">0</strong></div>
+        <div class="card centered-card"><span>Levels represented</span><strong id="statLevels">0</strong></div>
       </div>
 
       <div class="two-col">
@@ -149,20 +149,56 @@
       </div>
 
       <div class="mini-stats">
-        <div><span>Learner texts</span><strong id="analyzeDocs">0</strong></div>
-        <div><span>Total words</span><strong id="analyzeWords">0</strong></div>
-        <div><span>Annotations</span><strong id="analyzeAnnotations">0</strong></div>
+        <div class="centered-card"><span>Learner texts</span><strong id="analyzeDocs">0</strong></div>
+        <div class="centered-card"><span>Total words</span><strong id="analyzeWords">0</strong></div>
+        <div class="centered-card"><span>Annotations</span><strong id="analyzeAnnotations">0</strong></div>
+      </div>
+
+      <div class="mode-banner" id="analyzeModeBanner">
+        <strong>Corpus View</strong>
+        <span>Showing the selected corpus or learner level as a whole.</span>
       </div>
 
       <div class="tool-tabs">
-        <button class="toolbtn active" data-tool="search">Search</button>
-        <button class="toolbtn" data-tool="kwic">Concordance (KWIC)</button>
-        <button class="toolbtn" data-tool="wordlist">Wordlist</button>
-        <button class="toolbtn" data-tool="ngrams">N-grams</button>
-        <button class="toolbtn" data-tool="collocations">Collocations</button>
-        <button class="toolbtn" data-tool="texts">Texts</button>
-        <button class="toolbtn" data-tool="annotations">Annotations</button>
-        <button class="toolbtn" data-tool="texttypes">Text Type Analysis</button>
+        <div class="tool-wrap">
+          <button class="toolbtn active" data-tool="search">Search</button>
+          <button class="info-btn" type="button" aria-label="About Search" data-tip="Find learner texts that contain the entered word or phrase. Without a search term, all texts in the selected corpus or level are shown.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="kwic">Concordance (KWIC)</button>
+          <button class="info-btn" type="button" aria-label="About Concordance" data-tip="Key Word in Context. Enter a word or phrase to see every occurrence with the surrounding text before and after it. A search term is required.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="wordlist">Wordlist</button>
+          <button class="info-btn" type="button" aria-label="About Wordlist" data-tip="Lists word frequency in the selected corpus or level. If you enter a search term, Wordlist shows that term's frequency, percentage of the selected corpus, and occurrences per 1,000 words.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="ngrams">N-grams</button>
+          <button class="info-btn" type="button" aria-label="About N-grams" data-tip="Shows recurring consecutive 2-word and 3-word sequences. Without a search term, the most frequent sequences are shown. With a search term, only sequences containing that term are shown.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="collocations">Collocations</button>
+          <button class="info-btn" type="button" aria-label="About Collocations" data-tip="Shows words that frequently occur near the searched word or phrase. This helps identify associated vocabulary and usage patterns. A search term is required.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="texts">Texts</button>
+          <button class="info-btn" type="button" aria-label="About Texts" data-tip="Browse learner texts in the selected corpus or level. With a search term, only texts containing that term are shown.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="annotations">Annotations</button>
+          <button class="info-btn" type="button" aria-label="About Annotations" data-tip="Browse linguistic or learner-error annotations. With a search term, annotations from matching texts are shown.">i</button>
+        </div>
+
+        <div class="tool-wrap">
+          <button class="toolbtn" data-tool="texttypes">Text Type Analysis</button>
+          <button class="info-btn" type="button" aria-label="About Text Type Analysis" data-tip="Shows the distribution of texts and words across writing or task types. With a search term, it shows where that term occurs most across text types.">i</button>
+        </div>
       </div>
 
       <div class="panel">
@@ -197,12 +233,30 @@
       </div>
 
       <div class="tool-tabs">
-        <button class="insightbtn active" data-insight="overview">Overview</button>
-        <button class="insightbtn" data-insight="trends">Trends</button>
-        <button class="insightbtn" data-insight="distribution">Distribution</button>
-        <button class="insightbtn" data-insight="compare">Compare Levels</button>
-        <button class="insightbtn" data-insight="errors">Error Patterns</button>
-        <button class="insightbtn" data-insight="vocabulary">Vocabulary</button>
+        <div class="tool-wrap">
+          <button class="insightbtn active" data-insight="overview">Overview</button>
+          <button class="info-btn" type="button" aria-label="About Insights Overview" data-tip="Summarises the size and composition of the selected corpus or learner level.">i</button>
+        </div>
+        <div class="tool-wrap">
+          <button class="insightbtn" data-insight="trends">Trends</button>
+          <button class="info-btn" type="button" aria-label="About Trends" data-tip="Shows how selected measures change across learner levels.">i</button>
+        </div>
+        <div class="tool-wrap">
+          <button class="insightbtn" data-insight="distribution">Distribution</button>
+          <button class="info-btn" type="button" aria-label="About Distribution" data-tip="Shows how annotations or other features are distributed within the selected corpus.">i</button>
+        </div>
+        <div class="tool-wrap">
+          <button class="insightbtn" data-insight="compare">Compare Levels</button>
+          <button class="info-btn" type="button" aria-label="About Compare Levels" data-tip="Compares normalised measures across P4, P6, Secondary 2, Secondary 4, JC1 and JC2.">i</button>
+        </div>
+        <div class="tool-wrap">
+          <button class="insightbtn" data-insight="errors">Error Patterns</button>
+          <button class="info-btn" type="button" aria-label="About Error Patterns" data-tip="Summarises recurring learner-error or annotation categories in the selected corpus.">i</button>
+        </div>
+        <div class="tool-wrap">
+          <button class="insightbtn" data-insight="vocabulary">Vocabulary</button>
+          <button class="info-btn" type="button" aria-label="About Vocabulary" data-tip="Summarises vocabulary size, word diversity and the most frequent word forms.">i</button>
+        </div>
       </div>
 
       <div class="panel">
