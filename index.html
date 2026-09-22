@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Themozhi Tamil Learner Corpus</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="brand">THEMOZHI</div>
+      <h1>Tamil Learner Corpus</h1>
+      <p>Prototype corpus for learner language search, annotation and analysis</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="stats-grid">
+      <div class="card"><span class="label">Learner texts</span><strong id="statDocs">0</strong></div>
+      <div class="card"><span class="label">Total words</span><strong id="statWords">0</strong></div>
+      <div class="card"><span class="label">Annotations</span><strong id="statAnnotations">0</strong></div>
+      <div class="card"><span class="label">Levels represented</span><strong id="statLevels">0</strong></div>
+    </section>
+
+    <section class="panel">
+      <h2>Corpus Search</h2>
+      <div class="filters">
+        <input id="searchInput" type="search" placeholder="Search Tamil word or phrase..." />
+        <select id="levelFilter">
+          <option value="">All levels</option>
+          <option value="P4">Primary 4</option>
+          <option value="P6">Primary 6</option>
+          <option value="SEC2">Secondary 2</option>
+          <option value="SEC4">Secondary 4</option>
+          <option value="JC1">JC1</option>
+          <option value="JC2">JC2</option>
+        </select>
+        <select id="errorFilter">
+          <option value="">All annotation types</option>
+        </select>
+        <button id="clearBtn" type="button">Clear</button>
+      </div>
+      <div class="result-summary" id="resultSummary"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Corpus Documents</h2>
+      <div id="results"></div>
+    </section>
+  </main>
+
+  <dialog id="docDialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow" id="dialogId"></div>
+        <h2 id="dialogTitle"></h2>
+      </div>
+      <button id="closeDialog" class="icon-button" aria-label="Close">×</button>
+    </div>
+    <div id="dialogMeta" class="meta-row"></div>
+
+    <h3>Learner Text</h3>
+    <div id="dialogText" class="learner-text"></div>
+
+    <h3>Annotations</h3>
+    <div id="dialogAnnotations"></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
