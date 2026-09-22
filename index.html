@@ -56,7 +56,7 @@
       <div class="workflow panel">
         <div><strong>UPLOAD</strong><span>Add data → OCR/HTR → Verify → Annotate</span></div>
         <div class="arrow">→</div>
-        <div><strong>ANALYZE</strong><span>Search → KWIC → Words → Errors</span></div>
+        <div><strong>ANALYZE</strong><span>Search → KWIC → Wordlist → N-grams → Collocations</span></div>
         <div class="arrow">→</div>
         <div><strong>INSIGHTS</strong><span>Patterns → Trends → Compare levels</span></div>
       </div>
@@ -98,6 +98,16 @@
             </select>
           </label>
 
+          <label>
+            Topic / subject
+            <input id="uploadTopic" type="text" placeholder="e.g. School, Family, Environment" />
+          </label>
+
+          <label>
+            Prompt / question
+            <input id="uploadPrompt" type="text" placeholder="Actual learner writing prompt" />
+          </label>
+
           <label class="full">
             Select document
             <input id="uploadFile" type="file" accept=".txt,.json,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx" />
@@ -113,7 +123,7 @@
         </div>
 
         <div id="uploadPreview" class="upload-preview empty">
-          Select a file to preview its name and assigned level.
+          Select a file to preview its metadata.
         </div>
       </div>
     </section>
@@ -149,6 +159,7 @@
         <button class="toolbtn" data-tool="kwic">Concordance (KWIC)</button>
         <button class="toolbtn" data-tool="wordlist">Wordlist</button>
         <button class="toolbtn" data-tool="ngrams">N-grams</button>
+        <button class="toolbtn" data-tool="collocations">Collocations</button>
         <button class="toolbtn" data-tool="texts">Texts</button>
         <button class="toolbtn" data-tool="annotations">Annotations</button>
         <button class="toolbtn" data-tool="texttypes">Text Type Analysis</button>
@@ -159,6 +170,8 @@
           <input id="analyzeSearch" type="search" placeholder="Search Tamil word or phrase..." />
           <button id="analyzeClear" type="button">Clear</button>
         </div>
+
+        <div id="termSummary" class="term-summary"></div>
         <div id="analyzeOutput"></div>
       </div>
     </section>
@@ -208,6 +221,7 @@
     </div>
 
     <div id="dialogMeta" class="meta-row"></div>
+    <div id="dialogTopic" class="metadata-block"></div>
 
     <h3>Learner text</h3>
     <div id="dialogText" class="tamil learner-text"></div>

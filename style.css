@@ -163,7 +163,13 @@ h1 { margin: 0 0 4px; font-size: 24px; }
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
-.form-grid label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--muted); }
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--muted);
+}
 .form-grid .full { grid-column: 1 / -1; }
 
 input, select, button {
@@ -232,6 +238,51 @@ button:hover { background: var(--soft); }
   margin-bottom: 14px;
 }
 
+.term-summary {
+  margin: 0 0 18px;
+}
+.term-summary:empty { display: none; }
+
+.term-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.term-stat {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+.term-stat span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.term-stat strong { font-size: 20px; }
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.breakdown-box {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+.breakdown-box h4 { margin: 0 0 8px; }
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.breakdown-row:first-of-type { border-top: 0; }
+
 .result-item {
   border-top: 1px solid var(--border);
   padding: 15px 0;
@@ -248,6 +299,15 @@ button:hover { background: var(--soft); }
   color: #475467;
   font-size: 12px;
 }
+
+.metadata-block {
+  margin: 10px 0 18px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.metadata-block:empty { display: none; }
 
 .snippet, .learner-text { font-size: 19px; line-height: 1.9; }
 
@@ -323,7 +383,9 @@ dialog::backdrop { background: rgba(17,24,39,.45); }
 .icon-button { border: 0; font-size: 28px; line-height: 1; padding: 2px 8px; }
 
 @media (max-width: 850px) {
-  .stats-grid, .two-col, .mini-stats, .insight-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid, .two-col, .mini-stats, .insight-grid, .term-summary-grid, .breakdown-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
   .workflow { grid-template-columns: 1fr; }
   .arrow { transform: rotate(90deg); text-align: center; }
   .pipeline { grid-template-columns: 1fr; }
@@ -332,6 +394,9 @@ dialog::backdrop { background: rgba(17,24,39,.45); }
 }
 
 @media (max-width: 560px) {
-  .stats-grid, .two-col, .mini-stats, .insight-grid, .form-grid { grid-template-columns: 1fr; }
+  .stats-grid, .two-col, .mini-stats, .insight-grid, .form-grid,
+  .term-summary-grid, .breakdown-grid {
+    grid-template-columns: 1fr;
+  }
   .mainnav { overflow-x: auto; }
 }

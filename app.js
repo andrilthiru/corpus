@@ -21,17 +21,6 @@ function escapeRegExp(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function levelLabel(level) {
-  return ({
-    P4: "Primary 4",
-    P6: "Primary 6",
-    SEC2: "Secondary 2",
-    SEC4: "Secondary 4",
-    JC1: "JC1",
-    JC2: "JC2"
-  })[level] || level || "Overall";
-}
-
 function normalizeTamilText(text = "") {
   return String(text).normalize("NFC");
 }
@@ -46,6 +35,17 @@ function tokenize(text = "") {
 
 function countWords(text = "") {
   return tokenize(text).length;
+}
+
+function levelLabel(level) {
+  return ({
+    P4: "Primary 4",
+    P6: "Primary 6",
+    SEC2: "Secondary 2",
+    SEC4: "Secondary 4",
+    JC1: "JC1",
+    JC2: "JC2"
+  })[level] || level || "Overall";
 }
 
 function docsFor(level = "") {
@@ -119,25 +119,98 @@ function updateAnalyzeStats() {
   $("analyzeAnnotations").textContent = annotationCount(docs);
 }
 
-function renderSearchTool(docs, query) {
-  const q = normalizeTamilText(query).toLocaleLowerCase();
+function getMatchingDocs(docs, query) {
+  const q = normalizeTamilText(query).trim().toLocaleLowerCase();
+  if (!q) return docs;
 
-  const filtered = docs.filter((d) => {
-    if (!q) return true;
+  return docs.filter((d) => normalizeTamilText(d.text || "").toLocaleLowerCase().includes(q));
+}
 
-    const haystack = [
-      d.text || "",
-      d.title || "",
-      d.task || "",
-      d.id || ""
-    ].join(" ").normalize("NFC").toLocaleLowerCase();
+function countOccurrences(text = "", query = "") {
+  const q = normalizeTamilText(query).trim().toLocaleLowerCase();
+  if (!q) return 0;
 
-    return haystack.includes(q);
+  const haystack = normalizeTamilText(text).toLocaleLowerCase();
+  let count = 0;
+  let start = 0;
+
+  while (true) {
+    const index = haystack.indexOf(q, start);
+    if (index < 0) break;
+    count += 1;
+    start = index + Math.max(q.length, 1);
+  }
+
+  return count;
+}
+
+function topicLabel(doc) {
+  return doc.topic || doc.subject || "Unspecified";
+}
+
+function renderTermSummary(docs, query) {
+  const q = normalizeTamilText(query).trim();
+
+  if (!q) {
+    $("termSummary").innerHTML = "";
+    return;
+  }
+
+  const matching = getMatchingDocs(docs, q);
+  const occurrences = matching.reduce((sum, d) => sum + countOccurrences(d.text || "", q), 0);
+  const totalWords = docs.reduce((sum, d) => sum + countWords(d.text || ""), 0);
+  const rate = totalWords ? (occurrences / totalWords) * 1000 : 0;
+
+  const levelCounts = {};
+  matching.forEach((d) => {
+    levelCounts[d.level] = (levelCounts[d.level] || 0) + countOccurrences(d.text || "", q);
   });
 
+  const topicCounts = {};
+  matching.forEach((d) => {
+    const topic = topicLabel(d);
+    topicCounts[topic] = (topicCounts[topic] || 0) + countOccurrences(d.text || "", q);
+  });
+
+  const sortedLevels = Object.entries(levelCounts).sort((a, b) => b[1] - a[1]);
+  const sortedTopics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  $("termSummary").innerHTML = `
+    <div class="term-summary-grid">
+      <div class="term-stat"><span>Search term</span><strong class="tamil">${escapeHtml(q)}</strong></div>
+      <div class="term-stat"><span>Total occurrences</span><strong>${occurrences}</strong></div>
+      <div class="term-stat"><span>Texts containing term</span><strong>${matching.length}</strong></div>
+      <div class="term-stat"><span>Occurrences / 1,000 words</span><strong>${rate.toFixed(2)}</strong></div>
+    </div>
+
+    <div class="breakdown-grid">
+      <div class="breakdown-box">
+        <h4>Occurrences by level</h4>
+        ${sortedLevels.length
+          ? sortedLevels.map(([level, count]) =>
+              `<div class="breakdown-row"><span>${escapeHtml(levelLabel(level))}</span><strong>${count}</strong></div>`
+            ).join("")
+          : '<div class="small">No matching levels.</div>'}
+      </div>
+
+      <div class="breakdown-box">
+        <h4>Occurrences by topic</h4>
+        ${sortedTopics.length
+          ? sortedTopics.map(([topic, count]) =>
+              `<div class="breakdown-row"><span>${escapeHtml(topic)}</span><strong>${count}</strong></div>`
+            ).join("")
+          : '<div class="small">Topic metadata is not available yet.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderSearchTool(docs, query) {
+  const matching = getMatchingDocs(docs, query);
+
   return `
-    <div class="small">${filtered.length} document(s) found</div>
-    ${filtered.length ? filtered.map((d) => `
+    <div class="small">${matching.length} document(s) found</div>
+    ${matching.length ? matching.map((d) => `
       <article class="result-item">
         <div class="result-top">
           <div>
@@ -147,6 +220,7 @@ function renderSearchTool(docs, query) {
             <div class="meta-row">
               <span class="badge">${escapeHtml(levelLabel(d.level))}</span>
               <span class="badge">${escapeHtml(d.task || "Unspecified task")}</span>
+              <span class="badge">${escapeHtml(topicLabel(d))}</span>
               <span class="badge">${countWords(d.text || "")} words</span>
             </div>
           </div>
@@ -190,29 +264,27 @@ function renderKwicTool(docs, query) {
 
   if (!rows.length) return '<div class="empty">No concordance lines found.</div>';
 
-  return `
-    <div class="small">${rows.length} occurrence(s) found</div>
-    ${rows.map((r) => `
-      <div class="kwic">
-        <div class="kwic-left tamil">${escapeHtml(r.left)}</div>
-        <div class="kwic-key tamil"><mark>${escapeHtml(r.key)}</mark></div>
-        <div class="kwic-right tamil">${escapeHtml(r.right)}</div>
-        <div class="kwic-meta">
-          <button type="button" class="linkbtn" onclick="openDocument('${escapeHtml(r.doc.id)}')">
-            ${escapeHtml(r.doc.id)}
-          </button><br>
-          ${escapeHtml(levelLabel(r.doc.level))}
-        </div>
+  return rows.map((r) => `
+    <div class="kwic">
+      <div class="kwic-left tamil">${escapeHtml(r.left)}</div>
+      <div class="kwic-key tamil"><mark>${escapeHtml(r.key)}</mark></div>
+      <div class="kwic-right tamil">${escapeHtml(r.right)}</div>
+      <div class="kwic-meta">
+        <button type="button" class="linkbtn" onclick="openDocument('${escapeHtml(r.doc.id)}')">
+          ${escapeHtml(r.doc.id)}
+        </button><br>
+        ${escapeHtml(levelLabel(r.doc.level))}
       </div>
-    `).join("")}
-  `;
+    </div>
+  `).join("");
 }
 
-function renderWordlistTool(docs) {
+function renderWordlistTool(docs, query) {
+  const matching = query ? getMatchingDocs(docs, query) : docs;
   const counts = {};
   let total = 0;
 
-  docs.forEach((d) => {
+  matching.forEach((d) => {
     tokenize(d.text || "").forEach((word) => {
       counts[word] = (counts[word] || 0) + 1;
       total += 1;
@@ -226,11 +298,12 @@ function renderWordlistTool(docs) {
   if (!rows.length) return '<div class="empty">No words available for this selection.</div>';
 
   return `
-    <div class="small">${Object.keys(counts).length} unique word forms · ${total.toLocaleString()} total words</div>
+    <h3>${query ? `Wordlist — texts containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Wordlist"}</h3>
+    <div class="small">${Object.keys(counts).length} unique word forms · ${total.toLocaleString()} total words in this subset</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>#</th><th>Word</th><th>Frequency</th><th>% of words</th></tr>
+          <tr><th>#</th><th>Word</th><th>Frequency</th><th>% of subset</th></tr>
         </thead>
         <tbody>
           ${rows.map(([word, count], i) => `
@@ -247,29 +320,45 @@ function renderWordlistTool(docs) {
   `;
 }
 
-function renderNgramsTool(docs) {
-  const bigrams = {};
+function renderNgramsTool(docs, query) {
+  const matching = query ? getMatchingDocs(docs, query) : docs;
+  const counts = {};
+  const q = normalizeTamilText(query).trim().toLocaleLowerCase();
 
-  docs.forEach((d) => {
+  matching.forEach((d) => {
     const words = tokenize(d.text || "");
 
     for (let i = 0; i < words.length - 1; i += 1) {
-      const phrase = `${words[i]} ${words[i + 1]}`;
-      bigrams[phrase] = (bigrams[phrase] || 0) + 1;
+      const bigram = `${words[i]} ${words[i + 1]}`;
+      if (!q || bigram.toLocaleLowerCase().includes(q)) {
+        counts[bigram] = (counts[bigram] || 0) + 1;
+      }
+    }
+
+    for (let i = 0; i < words.length - 2; i += 1) {
+      const trigram = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+      if (!q || trigram.toLocaleLowerCase().includes(q)) {
+        counts[trigram] = (counts[trigram] || 0) + 1;
+      }
     }
   });
 
-  const rows = Object.entries(bigrams)
+  const rows = Object.entries(counts)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ta"))
     .slice(0, 100);
 
-  if (!rows.length) return '<div class="empty">Not enough text to calculate N-grams.</div>';
+  if (!rows.length) {
+    return query
+      ? `<div class="empty">No 2-word or 3-word N-grams containing “<span class="tamil">${escapeHtml(query)}</span>” were found.</div>`
+      : '<div class="empty">Not enough text to calculate N-grams.</div>';
+  }
 
   return `
-    <div class="small">Showing the 100 most frequent 2-word sequences.</div>
+    <h3>${query ? `N-grams containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Frequent N-grams"}</h3>
+    <div class="small">Consecutive 2-word and 3-word sequences.</div>
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>#</th><th>2-word N-gram</th><th>Frequency</th></tr></thead>
+        <thead><tr><th>#</th><th>N-gram</th><th>Frequency</th></tr></thead>
         <tbody>
           ${rows.map(([phrase, count], i) => `
             <tr>
@@ -284,18 +373,76 @@ function renderNgramsTool(docs) {
   `;
 }
 
-function renderTextsTool(docs) {
-  if (!docs.length) return '<div class="empty">No learner texts for this selection.</div>';
+function renderCollocationsTool(docs, query) {
+  const q = normalizeTamilText(query).trim();
+
+  if (!q) {
+    return '<div class="empty">Enter a Tamil word or phrase to see words occurring near it.</div>';
+  }
+
+  const qLower = q.toLocaleLowerCase();
+  const collocates = {};
+  const windowSize = 5;
+
+  docs.forEach((d) => {
+    const words = tokenize(d.text || "");
+
+    words.forEach((word, i) => {
+      if (word.toLocaleLowerCase().includes(qLower)) {
+        const start = Math.max(0, i - windowSize);
+        const end = Math.min(words.length, i + windowSize + 1);
+
+        for (let j = start; j < end; j += 1) {
+          if (j === i) continue;
+          const nearby = words[j];
+          collocates[nearby] = (collocates[nearby] || 0) + 1;
+        }
+      }
+    });
+  });
+
+  const rows = Object.entries(collocates)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ta"))
+    .slice(0, 100);
+
+  if (!rows.length) {
+    return `<div class="empty">No collocates found around “<span class="tamil">${escapeHtml(q)}</span>”.</div>`;
+  }
 
   return `
-    <div class="small">${docs.length} learner text(s)</div>
+    <h3>Collocations around “<span class="tamil">${escapeHtml(q)}</span>”</h3>
+    <div class="small">Words occurring within 5 words before or after the search term.</div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>#</th><th>Nearby word</th><th>Occurrences near search term</th></tr></thead>
+        <tbody>
+          ${rows.map(([word, count], i) => `
+            <tr>
+              <td>${i + 1}</td>
+              <td class="tamil">${escapeHtml(word)}</td>
+              <td>${count}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTextsTool(docs, query) {
+  const matching = query ? getMatchingDocs(docs, query) : docs;
+
+  if (!matching.length) return '<div class="empty">No learner texts for this selection.</div>';
+
+  return `
+    <div class="small">${matching.length} learner text(s)</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>ID</th><th>Level</th><th>Year</th><th>Task</th><th>Title</th><th>Words</th></tr>
+          <tr><th>ID</th><th>Level</th><th>Year</th><th>Task</th><th>Topic</th><th>Title</th><th>Occurrences</th><th>Words</th></tr>
         </thead>
         <tbody>
-          ${docs.map((d) => `
+          ${matching.map((d) => `
             <tr>
               <td>
                 <button type="button" class="linkbtn" onclick="openDocument('${escapeHtml(d.id)}')">
@@ -305,7 +452,9 @@ function renderTextsTool(docs) {
               <td>${escapeHtml(levelLabel(d.level))}</td>
               <td>${escapeHtml(d.year || "—")}</td>
               <td>${escapeHtml(d.task || "—")}</td>
+              <td>${escapeHtml(topicLabel(d))}</td>
               <td class="tamil">${escapeHtml(d.title || "Untitled")}</td>
+              <td>${query ? countOccurrences(d.text || "", query) : "—"}</td>
               <td>${countWords(d.text || "")}</td>
             </tr>
           `).join("")}
@@ -315,23 +464,27 @@ function renderTextsTool(docs) {
   `;
 }
 
-function renderAnnotationsTool(docs) {
-  const rows = docs.flatMap((d) =>
+function renderAnnotationsTool(docs, query) {
+  const matching = query ? getMatchingDocs(docs, query) : docs;
+  const rows = matching.flatMap((d) =>
     (d.annotations || []).map((a) => ({ doc: d, annotation: a }))
   );
 
   if (!rows.length) {
-    return '<div class="empty">No annotations are available for this selection yet.</div>';
+    return query
+      ? `<div class="empty">No annotations are available in texts containing “<span class="tamil">${escapeHtml(query)}</span>”.</div>`
+      : '<div class="empty">No annotations are available for this selection yet.</div>';
   }
 
   return `
-    <div class="small">${rows.length} annotation(s)</div>
+    <div class="small">${rows.length} annotation(s) in ${matching.length} matching text(s)</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
           <tr>
             <th>Document</th>
             <th>Level</th>
+            <th>Topic</th>
             <th>Learner form</th>
             <th>Category</th>
             <th>Suggested / standard form</th>
@@ -347,6 +500,7 @@ function renderAnnotationsTool(docs) {
                 </button>
               </td>
               <td>${escapeHtml(levelLabel(doc.level))}</td>
+              <td>${escapeHtml(topicLabel(doc))}</td>
               <td class="tamil">${escapeHtml(a.text || "—")}</td>
               <td>${escapeHtml(a.category || "Uncategorised")}</td>
               <td class="tamil">${escapeHtml(a.suggested || "—")}</td>
@@ -359,33 +513,45 @@ function renderAnnotationsTool(docs) {
   `;
 }
 
-function renderTextTypeTool(docs) {
+function renderTextTypeTool(docs, query) {
+  const matching = query ? getMatchingDocs(docs, query) : docs;
   const groups = {};
 
-  docs.forEach((d) => {
+  matching.forEach((d) => {
     const task = d.task || "Unspecified";
-    if (!groups[task]) groups[task] = { docs: 0, words: 0, annotations: 0 };
+    if (!groups[task]) groups[task] = { docs: 0, words: 0, annotations: 0, occurrences: 0 };
 
     groups[task].docs += 1;
     groups[task].words += countWords(d.text || "");
     groups[task].annotations += (d.annotations || []).length;
+    groups[task].occurrences += query ? countOccurrences(d.text || "", query) : 0;
   });
 
-  const rows = Object.entries(groups).sort((a, b) => b[1].docs - a[1].docs);
+  const rows = Object.entries(groups).sort((a, b) =>
+    query ? b[1].occurrences - a[1].occurrences : b[1].docs - a[1].docs
+  );
 
   if (!rows.length) return '<div class="empty">No text-type metadata available.</div>';
 
   return `
+    <h3>${query ? `Text types containing “<span class="tamil">${escapeHtml(query)}</span>”` : "Text Type Analysis"}</h3>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>Text / task type</th><th>Texts</th><th>Total words</th><th>Annotations</th></tr>
+          <tr>
+            <th>Text / task type</th>
+            <th>Texts</th>
+            ${query ? "<th>Term occurrences</th>" : ""}
+            <th>Total words</th>
+            <th>Annotations</th>
+          </tr>
         </thead>
         <tbody>
           ${rows.map(([task, stats]) => `
             <tr>
               <td>${escapeHtml(task)}</td>
               <td>${stats.docs}</td>
+              ${query ? `<td>${stats.occurrences}</td>` : ""}
               <td>${stats.words.toLocaleString()}</td>
               <td>${stats.annotations}</td>
             </tr>
@@ -402,15 +568,18 @@ function renderAnalyze() {
   const docs = docsFor(analyzeLevel);
   const query = $("analyzeSearch").value.trim();
 
+  renderTermSummary(docs, query);
+
   let html = "";
 
   if (analyzeTool === "search") html = renderSearchTool(docs, query);
   else if (analyzeTool === "kwic") html = renderKwicTool(docs, query);
-  else if (analyzeTool === "wordlist") html = renderWordlistTool(docs);
-  else if (analyzeTool === "ngrams") html = renderNgramsTool(docs);
-  else if (analyzeTool === "texts") html = renderTextsTool(docs);
-  else if (analyzeTool === "annotations") html = renderAnnotationsTool(docs);
-  else if (analyzeTool === "texttypes") html = renderTextTypeTool(docs);
+  else if (analyzeTool === "wordlist") html = renderWordlistTool(docs, query);
+  else if (analyzeTool === "ngrams") html = renderNgramsTool(docs, query);
+  else if (analyzeTool === "collocations") html = renderCollocationsTool(docs, query);
+  else if (analyzeTool === "texts") html = renderTextsTool(docs, query);
+  else if (analyzeTool === "annotations") html = renderAnnotationsTool(docs, query);
+  else if (analyzeTool === "texttypes") html = renderTextTypeTool(docs, query);
   else html = '<div class="empty">Unknown analysis tool.</div>';
 
   $("analyzeOutput").innerHTML = html;
@@ -535,10 +704,7 @@ function renderInsights() {
         </table>
       </div>
     `;
-    return;
   }
-
-  $("insightOutput").innerHTML = '<div class="empty">No insight view available.</div>';
 }
 
 window.openDocument = function (id) {
@@ -553,6 +719,11 @@ window.openDocument = function (id) {
     <span class="badge">${escapeHtml(d.year || "—")}</span>
     <span class="badge">${escapeHtml(d.task || "—")}</span>
     <span class="badge">${countWords(d.text || "")} words</span>
+  `;
+
+  $("dialogTopic").innerHTML = `
+    <strong>Topic:</strong> ${escapeHtml(topicLabel(d))}
+    ${d.prompt ? `<br><strong>Prompt:</strong> <span class="tamil">${escapeHtml(d.prompt)}</span>` : ""}
   `;
 
   $("dialogText").textContent = d.text || "";
@@ -574,6 +745,30 @@ window.openDocument = function (id) {
 
   $("docDialog").showModal();
 };
+
+function updateUploadPreview() {
+  const file = $("uploadFile").files?.[0];
+  if (!file) return;
+
+  $("uploadPreview").classList.remove("empty");
+  $("uploadPreview").innerHTML = `
+    <strong>${escapeHtml(file.name)}</strong><br>
+    <span class="small">
+      Level: ${escapeHtml(levelLabel($("uploadLevel").value))}
+      · Task: ${escapeHtml($("uploadTask").value)}
+      · Topic: ${escapeHtml($("uploadTopic").value || "Unspecified")}
+      · ${(file.size / 1024).toFixed(1)} KB
+    </span>
+    ${$("uploadPrompt").value
+      ? `<br><span class="small">Prompt: <span class="tamil">${escapeHtml($("uploadPrompt").value)}</span></span>`
+      : ""}
+    <br><br>
+    <span class="small">
+      Prototype only: production flow will route the file through OCR/HTR,
+      human verification, anonymisation and annotation before it enters the corpus.
+    </span>
+  `;
+}
 
 function wireNavigation() {
   document.querySelectorAll(".navbtn").forEach((button) => {
@@ -600,9 +795,7 @@ function wireNavigation() {
     });
   });
 
-  $("analyzeSearch").addEventListener("input", () => {
-    if (analyzeTool === "search" || analyzeTool === "kwic") renderAnalyze();
-  });
+  $("analyzeSearch").addEventListener("input", renderAnalyze);
 
   $("analyzeClear").addEventListener("click", () => {
     $("analyzeSearch").value = "";
@@ -629,27 +822,9 @@ function wireNavigation() {
     });
   });
 
-  $("uploadFile").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    $("uploadPreview").classList.remove("empty");
-    $("uploadPreview").innerHTML = `
-      <strong>${escapeHtml(file.name)}</strong><br>
-      <span class="small">
-        Assigned level: ${escapeHtml(levelLabel($("uploadLevel").value))}
-        · ${(file.size / 1024).toFixed(1)} KB
-      </span><br><br>
-      <span class="small">
-        Prototype only: the next production step will route the file through OCR/HTR,
-        human verification, anonymisation and annotation before it enters the corpus.
-      </span>
-    `;
-  });
-
-  $("uploadLevel").addEventListener("change", () => {
-    const file = $("uploadFile").files?.[0];
-    if (file) $("uploadFile").dispatchEvent(new Event("change"));
+  ["uploadFile", "uploadLevel", "uploadTask", "uploadTopic", "uploadPrompt"].forEach((id) => {
+    $(id).addEventListener(id === "uploadFile" ? "change" : "input", updateUploadPreview);
+    $(id).addEventListener("change", updateUploadPreview);
   });
 
   $("closeDialog").addEventListener("click", () => $("docDialog").close());
