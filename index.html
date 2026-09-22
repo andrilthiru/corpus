@@ -8,45 +8,193 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
+    <div class="brandblock">
       <div class="brand">THEMOZHI</div>
-      <h1>Tamil Learner Corpus</h1>
-      <p>Prototype corpus for learner language search, annotation and analysis</p>
+      <div>
+        <h1>Tamil Learner Corpus</h1>
+        <p>Search, annotation and learner-language insights</p>
+      </div>
     </div>
+
+    <nav class="mainnav">
+      <button class="navbtn active" data-section="dashboard">Dashboard</button>
+      <button class="navbtn" data-section="upload">Upload</button>
+      <button class="navbtn" data-section="analyze">Analyze</button>
+      <button class="navbtn" data-section="insights">Insights</button>
+    </nav>
   </header>
 
   <main class="container">
-    <section class="stats-grid">
-      <div class="card"><span class="label">Learner texts</span><strong id="statDocs">0</strong></div>
-      <div class="card"><span class="label">Total words</span><strong id="statWords">0</strong></div>
-      <div class="card"><span class="label">Annotations</span><strong id="statAnnotations">0</strong></div>
-      <div class="card"><span class="label">Levels represented</span><strong id="statLevels">0</strong></div>
-    </section>
-
-    <section class="panel">
-      <h2>Corpus Search</h2>
-      <div class="filters">
-        <input id="searchInput" type="search" placeholder="Search Tamil word or phrase..." />
-        <select id="levelFilter">
-          <option value="">All levels</option>
-          <option value="P4">Primary 4</option>
-          <option value="P6">Primary 6</option>
-          <option value="SEC2">Secondary 2</option>
-          <option value="SEC4">Secondary 4</option>
-          <option value="JC1">JC1</option>
-          <option value="JC2">JC2</option>
-        </select>
-        <select id="errorFilter">
-          <option value="">All annotation types</option>
-        </select>
-        <button id="clearBtn" type="button">Clear</button>
+    <!-- DASHBOARD -->
+    <section id="dashboard" class="page active">
+      <div class="pagehead">
+        <div>
+          <div class="eyebrow">OVERVIEW</div>
+          <h2>Corpus Dashboard</h2>
+          <p class="subtext">Overall status of the Tamil learner corpus.</p>
+        </div>
       </div>
-      <div class="result-summary" id="resultSummary"></div>
+
+      <div class="stats-grid">
+        <div class="card"><span>Learner texts</span><strong id="statDocs">0</strong></div>
+        <div class="card"><span>Total words</span><strong id="statWords">0</strong></div>
+        <div class="card"><span>Annotations</span><strong id="statAnnotations">0</strong></div>
+        <div class="card"><span>Levels represented</span><strong id="statLevels">0</strong></div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <h3>Learner levels</h3>
+          <div id="levelBreakdown"></div>
+        </div>
+        <div class="panel">
+          <h3>Annotation categories</h3>
+          <div id="annotationBreakdown"></div>
+        </div>
+      </div>
+
+      <div class="workflow panel">
+        <div><strong>UPLOAD</strong><span>Add data → OCR/HTR → Verify → Annotate</span></div>
+        <div class="arrow">→</div>
+        <div><strong>ANALYZE</strong><span>Search → KWIC → Words → Errors</span></div>
+        <div class="arrow">→</div>
+        <div><strong>INSIGHTS</strong><span>Patterns → Trends → Compare levels</span></div>
+      </div>
     </section>
 
-    <section class="panel">
-      <h2>Corpus Documents</h2>
-      <div id="results"></div>
+    <!-- UPLOAD -->
+    <section id="upload" class="page">
+      <div class="pagehead">
+        <div>
+          <div class="eyebrow">ADD DATA</div>
+          <h2>Upload Learner Material</h2>
+          <p class="subtext">Prototype workflow. OCR/HTR and persistent saving will be added later.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="form-grid">
+          <label>
+            Learner level
+            <select id="uploadLevel">
+              <option value="P4">Primary 4</option>
+              <option value="P6">Primary 6</option>
+              <option value="SEC2">Secondary 2</option>
+              <option value="SEC4">Secondary 4</option>
+              <option value="JC1">JC1</option>
+              <option value="JC2">JC2</option>
+            </select>
+          </label>
+
+          <label>
+            Task type
+            <select id="uploadTask">
+              <option>Composition</option>
+              <option>Situational Writing</option>
+              <option>Narrative</option>
+              <option>Argumentative Writing</option>
+              <option>Reflective Writing</option>
+              <option>Expository Writing</option>
+            </select>
+          </label>
+
+          <label class="full">
+            Select document
+            <input id="uploadFile" type="file" accept=".txt,.json,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx" />
+          </label>
+        </div>
+
+        <div class="pipeline">
+          <div class="pipe-step active">1. Upload</div>
+          <div class="pipe-step">2. OCR / HTR</div>
+          <div class="pipe-step">3. Verify</div>
+          <div class="pipe-step">4. Annotate</div>
+          <div class="pipe-step">5. Add to corpus</div>
+        </div>
+
+        <div id="uploadPreview" class="upload-preview empty">
+          Select a file to preview its name and assigned level.
+        </div>
+      </div>
+    </section>
+
+    <!-- ANALYZE -->
+    <section id="analyze" class="page">
+      <div class="pagehead">
+        <div>
+          <div class="eyebrow">EXAMINE DATA</div>
+          <h2>Analyze</h2>
+          <p class="subtext">Search and investigate learner texts directly.</p>
+        </div>
+      </div>
+
+      <div class="level-tabs" id="analyzeLevelTabs">
+        <button class="levelbtn active" data-level="">Overall</button>
+        <button class="levelbtn" data-level="P4">P4</button>
+        <button class="levelbtn" data-level="P6">P6</button>
+        <button class="levelbtn" data-level="SEC2">Sec 2</button>
+        <button class="levelbtn" data-level="SEC4">Sec 4</button>
+        <button class="levelbtn" data-level="JC1">JC1</button>
+        <button class="levelbtn" data-level="JC2">JC2</button>
+      </div>
+
+      <div class="mini-stats">
+        <div><span>Learner texts</span><strong id="analyzeDocs">0</strong></div>
+        <div><span>Total words</span><strong id="analyzeWords">0</strong></div>
+        <div><span>Annotations</span><strong id="analyzeAnnotations">0</strong></div>
+      </div>
+
+      <div class="tool-tabs">
+        <button class="toolbtn active" data-tool="search">Search</button>
+        <button class="toolbtn" data-tool="kwic">Concordance (KWIC)</button>
+        <button class="toolbtn" data-tool="wordlist">Wordlist</button>
+        <button class="toolbtn" data-tool="ngrams">N-grams</button>
+        <button class="toolbtn" data-tool="texts">Texts</button>
+        <button class="toolbtn" data-tool="annotations">Annotations</button>
+        <button class="toolbtn" data-tool="texttypes">Text Type Analysis</button>
+      </div>
+
+      <div class="panel">
+        <div class="searchbar">
+          <input id="analyzeSearch" type="search" placeholder="Search Tamil word or phrase..." />
+          <button id="analyzeClear" type="button">Clear</button>
+        </div>
+        <div id="analyzeOutput"></div>
+      </div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section id="insights" class="page">
+      <div class="pagehead">
+        <div>
+          <div class="eyebrow">FIND PATTERNS</div>
+          <h2>Insights</h2>
+          <p class="subtext">Patterns, trends, comparisons and statistics derived from the corpus.</p>
+        </div>
+      </div>
+
+      <div class="level-tabs" id="insightLevelTabs">
+        <button class="levelbtn active" data-level="">Overall</button>
+        <button class="levelbtn" data-level="P4">P4</button>
+        <button class="levelbtn" data-level="P6">P6</button>
+        <button class="levelbtn" data-level="SEC2">Sec 2</button>
+        <button class="levelbtn" data-level="SEC4">Sec 4</button>
+        <button class="levelbtn" data-level="JC1">JC1</button>
+        <button class="levelbtn" data-level="JC2">JC2</button>
+      </div>
+
+      <div class="tool-tabs">
+        <button class="insightbtn active" data-insight="overview">Overview</button>
+        <button class="insightbtn" data-insight="trends">Trends</button>
+        <button class="insightbtn" data-insight="distribution">Distribution</button>
+        <button class="insightbtn" data-insight="compare">Compare Levels</button>
+        <button class="insightbtn" data-insight="errors">Error Patterns</button>
+        <button class="insightbtn" data-insight="vocabulary">Vocabulary</button>
+      </div>
+
+      <div class="panel">
+        <div id="insightOutput"></div>
+      </div>
     </section>
   </main>
 
@@ -58,10 +206,11 @@
       </div>
       <button id="closeDialog" class="icon-button" aria-label="Close">×</button>
     </div>
+
     <div id="dialogMeta" class="meta-row"></div>
 
-    <h3>Learner Text</h3>
-    <div id="dialogText" class="learner-text"></div>
+    <h3>Learner text</h3>
+    <div id="dialogText" class="tamil learner-text"></div>
 
     <h3>Annotations</h3>
     <div id="dialogAnnotations"></div>
