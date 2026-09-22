@@ -818,28 +818,269 @@ window.openDocument = function (id) {
   $("docDialog").showModal();
 };
 
-function updateUploadPreview() {
+let uploadCurrentStep = 1;
+let uploadObjectUrl = null;
+let draftAnnotations = [];
+
+function currentUploadRecord() {
+  return {
+    id: $("uploadDocId").value.trim() || "DRAFT-001",
+    level: $("uploadLevel").value,
+    year: String($("uploadYear").value || ""),
+    task: $("uploadTask").value,
+    topic: $("uploadTopic").value.trim(),
+    prompt: $("uploadPrompt").value.trim(),
+    title: $("uploadTitle").value.trim() || "Untitled",
+    source_type: $("uploadSourceType").value,
+    source_filename: $("uploadFile").files?.[0]?.name || "",
+    text: $("verifiedText").value,
+    annotations: draftAnnotations
+  };
+}
+
+function goUploadStep(step) {
+  uploadCurrentStep = Number(step);
+
+  document.querySelectorAll(".upload-step-panel").forEach((panel) => {
+    panel.classList.toggle("active", Number(panel.dataset.uploadPanel) === uploadCurrentStep);
+  });
+
+  document.querySelectorAll("#uploadPipeline .pipe-step").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.uploadStep) === uploadCurrentStep);
+  });
+
+  if (uploadCurrentStep === 5) renderRecordReview();
+}
+
+function detectProcessingRoute(file) {
+  if (!file) return "Awaiting file";
+
+  const sourceType = $("uploadSourceType").value;
+  if (sourceType === "handwritten") return "Handwriting → HTR";
+  if (sourceType === "printed") return "Printed scan → OCR";
+  if (sourceType === "digital") return "Digital text → Extract";
+
+  const name = file.name.toLowerCase();
+  const type = file.type || "";
+  if (name.endsWith(".txt") || name.endsWith(".json")) return "Digital text → Extract";
+  if (type.startsWith("image/") || name.endsWith(".pdf")) return "Scan / image → OCR or HTR";
+  if (name.endsWith(".docx")) return "DOCX → Text extraction";
+  return "Document processing";
+}
+
+function renderSourcePreview(targetId) {
+  const target = $(targetId);
+  const file = $("uploadFile").files?.[0];
+
+  if (!file) {
+    target.className = "source-preview empty";
+    target.textContent = "No document selected.";
+    return;
+  }
+
+  const name = file.name.toLowerCase();
+  const type = file.type || "";
+
+  if (type.startsWith("image/")) {
+    if (!uploadObjectUrl) uploadObjectUrl = URL.createObjectURL(file);
+    target.className = "source-preview";
+    target.innerHTML = `<img src="${uploadObjectUrl}" alt="Uploaded learner document preview" />`;
+    return;
+  }
+
+  if (name.endsWith(".pdf")) {
+    if (!uploadObjectUrl) uploadObjectUrl = URL.createObjectURL(file);
+    target.className = "source-preview";
+    target.innerHTML = `<iframe src="${uploadObjectUrl}#toolbar=0" title="PDF preview"></iframe>`;
+    return;
+  }
+
+  if (name.endsWith(".txt") || name.endsWith(".json")) {
+    target.className = "source-preview";
+    target.innerHTML = `<pre class="tamil">${escapeHtml($("machineText").value || "Text file selected. Continue to load/examine the extracted text.")}</pre>`;
+    return;
+  }
+
+  target.className = "source-preview";
+  target.innerHTML = `<div class="small"><strong>${escapeHtml(file.name)}</strong><br><br>Preview is not available in this browser prototype for this file type.</div>`;
+}
+
+async function loadSelectedFile() {
   const file = $("uploadFile").files?.[0];
   if (!file) return;
+
+  if (uploadObjectUrl) {
+    URL.revokeObjectURL(uploadObjectUrl);
+    uploadObjectUrl = null;
+  }
+
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".txt")) {
+    $("machineText").value = await file.text();
+  } else if (lower.endsWith(".json")) {
+    const raw = await file.text();
+    try {
+      const parsed = JSON.parse(raw);
+      $("machineText").value = typeof parsed === "string" ? parsed : (parsed.text || raw);
+    } catch {
+      $("machineText").value = raw;
+    }
+  } else {
+    $("machineText").value = "";
+  }
+
+  $("processingRoute").textContent = detectProcessingRoute(file);
+  renderSourcePreview("sourcePreview");
+  renderSourcePreview("verifySourcePreview");
+  updateUploadPreview();
+}
+
+function updateUploadPreview() {
+  const file = $("uploadFile").files?.[0];
+
+  if (!file) {
+    $("uploadPreview").className = "upload-preview empty";
+    $("uploadPreview").textContent = "Select a file to preview its metadata.";
+    return;
+  }
 
   $("uploadPreview").classList.remove("empty");
   $("uploadPreview").innerHTML = `
     <strong>${escapeHtml(file.name)}</strong><br>
     <span class="small">
-      Level: ${escapeHtml(levelLabel($("uploadLevel").value))}
+      ID: ${escapeHtml($("uploadDocId").value.trim() || "Draft")}
+      · Level: ${escapeHtml(levelLabel($("uploadLevel").value))}
+      · Year: ${escapeHtml($("uploadYear").value || "—")}
       · Task: ${escapeHtml($("uploadTask").value)}
       · Topic: ${escapeHtml($("uploadTopic").value || "Unspecified")}
+      · Route: ${escapeHtml(detectProcessingRoute(file))}
       · ${(file.size / 1024).toFixed(1)} KB
     </span>
-    ${$("uploadPrompt").value
-      ? `<br><span class="small">Prompt: <span class="tamil">${escapeHtml($("uploadPrompt").value)}</span></span>`
-      : ""}
-    <br><br>
-    <span class="small">
-      Prototype only: production flow will route the file through OCR/HTR,
-      human verification, anonymisation and annotation before it enters the corpus.
-    </span>
   `;
+}
+
+function addDraftAnnotation() {
+  const text = $("annotationText").value.trim();
+  if (!text) {
+    alert("Enter the learner form before adding an annotation.");
+    return;
+  }
+
+  draftAnnotations.push({
+    text,
+    category: $("annotationCategory").value,
+    suggested: $("annotationSuggested").value.trim(),
+    note: $("annotationNote").value.trim()
+  });
+
+  $("annotationText").value = "";
+  $("annotationSuggested").value = "";
+  $("annotationNote").value = "";
+  renderDraftAnnotations();
+}
+
+function renderDraftAnnotations() {
+  const target = $("draftAnnotationList");
+
+  if (!draftAnnotations.length) {
+    target.innerHTML = '<div class="empty">No annotations added yet.</div>';
+    return;
+  }
+
+  target.innerHTML = draftAnnotations.map((a, i) => `
+    <div class="annotation-draft-item">
+      <div>
+        <strong class="tamil">${escapeHtml(a.text)}</strong>
+        <div class="small">${escapeHtml(a.category)}${a.suggested ? ` · Suggested: <span class="tamil">${escapeHtml(a.suggested)}</span>` : ""}${a.note ? ` · ${escapeHtml(a.note)}` : ""}</div>
+      </div>
+      <button type="button" data-remove-annotation="${i}" aria-label="Remove annotation">×</button>
+    </div>
+  `).join("");
+
+  target.querySelectorAll("[data-remove-annotation]").forEach((button) => {
+    button.addEventListener("click", () => {
+      draftAnnotations.splice(Number(button.dataset.removeAnnotation), 1);
+      renderDraftAnnotations();
+    });
+  });
+}
+
+function renderRecordReview() {
+  const record = currentUploadRecord();
+  const json = JSON.stringify(record, null, 2);
+
+  $("recordReview").innerHTML = `
+    <div class="record-review-grid">
+      <div class="review-box">
+        <h4>Metadata</h4>
+        <div class="small">
+          <strong>ID:</strong> ${escapeHtml(record.id)}<br>
+          <strong>Level:</strong> ${escapeHtml(levelLabel(record.level))}<br>
+          <strong>Year:</strong> ${escapeHtml(record.year || "—")}<br>
+          <strong>Task:</strong> ${escapeHtml(record.task)}<br>
+          <strong>Topic:</strong> ${escapeHtml(record.topic || "Unspecified")}<br>
+          <strong>Title:</strong> <span class="tamil">${escapeHtml(record.title)}</span><br>
+          <strong>Prompt:</strong> <span class="tamil">${escapeHtml(record.prompt || "—")}</span><br>
+          <strong>Source:</strong> ${escapeHtml(record.source_filename || "—")}
+        </div>
+      </div>
+      <div class="review-box">
+        <h4>Record summary</h4>
+        <div class="small">
+          <strong>Verified words:</strong> ${countWords(record.text)}<br>
+          <strong>Annotations:</strong> ${record.annotations.length}<br>
+          <strong>Verification:</strong> ${$("verificationChecked").checked ? "Confirmed" : "Not confirmed"}
+        </div>
+      </div>
+    </div>
+    <div class="review-box">
+      <h4>Verified learner text</h4>
+      <div class="tamil learner-text">${escapeHtml(record.text || "No verified text entered.")}</div>
+    </div>
+    <h4 style="margin-top:18px">JSON record</h4>
+    <pre class="review-json" id="reviewJson">${escapeHtml(json)}</pre>
+  `;
+}
+
+function downloadRecordJson() {
+  const record = currentUploadRecord();
+  const blob = new Blob([JSON.stringify(record, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${record.id || "corpus-record"}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function copyRecordJson() {
+  const json = JSON.stringify(currentUploadRecord(), null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    alert("Corpus record JSON copied.");
+  } catch {
+    alert("Copy was blocked by the browser. You can copy the JSON from the review box manually.");
+  }
+}
+
+function resetUploadWorkflow() {
+  $("uploadDocId").value = "";
+  $("uploadYear").value = "2026";
+  $("uploadTopic").value = "";
+  $("uploadTitle").value = "";
+  $("uploadPrompt").value = "";
+  $("uploadSourceType").value = "auto";
+  $("uploadFile").value = "";
+  $("machineText").value = "";
+  $("verifiedText").value = "";
+  $("verificationChecked").checked = false;
+  draftAnnotations = [];
+  renderDraftAnnotations();
+  updateUploadPreview();
+  $("processingRoute").textContent = "Awaiting file";
+  renderSourcePreview("sourcePreview");
+  renderSourcePreview("verifySourcePreview");
+  goUploadStep(1);
 }
 
 function wireNavigation() {
@@ -894,10 +1135,56 @@ function wireNavigation() {
     });
   });
 
-  ["uploadFile", "uploadLevel", "uploadTask", "uploadTopic", "uploadPrompt"].forEach((id) => {
-    $(id).addEventListener(id === "uploadFile" ? "change" : "input", updateUploadPreview);
+  document.querySelectorAll("#uploadPipeline [data-upload-step]").forEach((button) => {
+    button.addEventListener("click", () => goUploadStep(button.dataset.uploadStep));
+  });
+
+  document.querySelectorAll("[data-prev-step]").forEach((button) => {
+    button.addEventListener("click", () => goUploadStep(button.dataset.prevStep));
+  });
+
+  ["uploadDocId", "uploadLevel", "uploadYear", "uploadTask", "uploadTopic", "uploadTitle", "uploadPrompt", "uploadSourceType"].forEach((id) => {
+    $(id).addEventListener("input", updateUploadPreview);
     $(id).addEventListener("change", updateUploadPreview);
   });
+
+  $("uploadFile").addEventListener("change", loadSelectedFile);
+
+  $("uploadToProcess").addEventListener("click", async () => {
+    if (!$("uploadFile").files?.[0]) {
+      alert("Select a learner document first.");
+      return;
+    }
+    await loadSelectedFile();
+    goUploadStep(2);
+  });
+
+  $("uploadToVerify").addEventListener("click", () => {
+    $("verifiedText").value = $("machineText").value;
+    renderSourcePreview("verifySourcePreview");
+    goUploadStep(3);
+  });
+
+  $("uploadToAnnotate").addEventListener("click", () => {
+    if (!$("verifiedText").value.trim()) {
+      alert("Enter or verify the learner transcription before continuing.");
+      return;
+    }
+    if (!$("verificationChecked").checked) {
+      const proceed = confirm("The transcription has not been marked as verified. Continue anyway?");
+      if (!proceed) return;
+    }
+    goUploadStep(4);
+  });
+
+  $("addAnnotationBtn").addEventListener("click", addDraftAnnotation);
+  $("uploadToReview").addEventListener("click", () => goUploadStep(5));
+  $("downloadRecordBtn").addEventListener("click", downloadRecordJson);
+  $("copyRecordBtn").addEventListener("click", copyRecordJson);
+  $("resetUploadBtn").addEventListener("click", resetUploadWorkflow);
+
+  renderDraftAnnotations();
+  goUploadStep(1);
 
   $("closeDialog").addEventListener("click", () => $("docDialog").close());
 }

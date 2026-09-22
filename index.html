@@ -68,12 +68,26 @@
         <div>
           <div class="eyebrow">ADD DATA</div>
           <h2>Upload Learner Material</h2>
-          <p class="subtext">Prototype workflow. OCR/HTR and persistent saving will be added later.</p>
+          <p class="subtext">Build a corpus record through metadata, OCR/HTR, verification and annotation.</p>
         </div>
       </div>
 
-      <div class="panel">
+      <div class="pipeline" id="uploadPipeline">
+        <button class="pipe-step active" type="button" data-upload-step="1">1. Upload</button>
+        <button class="pipe-step" type="button" data-upload-step="2">2. OCR / HTR</button>
+        <button class="pipe-step" type="button" data-upload-step="3">3. Verify</button>
+        <button class="pipe-step" type="button" data-upload-step="4">4. Annotate</button>
+        <button class="pipe-step" type="button" data-upload-step="5">5. Review</button>
+      </div>
+
+      <div class="panel upload-step-panel active" data-upload-panel="1">
+        <h3>1. Document and metadata</h3>
         <div class="form-grid">
+          <label>
+            Document ID
+            <input id="uploadDocId" type="text" placeholder="e.g. SEC2-001" />
+          </label>
+
           <label>
             Learner level
             <select id="uploadLevel">
@@ -84,6 +98,11 @@
               <option value="JC1">JC1</option>
               <option value="JC2">JC2</option>
             </select>
+          </label>
+
+          <label>
+            Year
+            <input id="uploadYear" type="number" min="2000" max="2100" value="2026" />
           </label>
 
           <label>
@@ -104,26 +123,143 @@
           </label>
 
           <label>
+            Title
+            <input id="uploadTitle" type="text" placeholder="Title of learner text" />
+          </label>
+
+          <label class="full">
             Prompt / question
             <input id="uploadPrompt" type="text" placeholder="Actual learner writing prompt" />
           </label>
 
-          <label class="full">
+          <label>
+            Source type
+            <select id="uploadSourceType">
+              <option value="auto">Auto detect</option>
+              <option value="handwritten">Handwritten</option>
+              <option value="printed">Printed / typed scan</option>
+              <option value="digital">Digital text</option>
+            </select>
+          </label>
+
+          <label>
             Select document
             <input id="uploadFile" type="file" accept=".txt,.json,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx" />
           </label>
         </div>
 
-        <div class="pipeline">
-          <div class="pipe-step active">1. Upload</div>
-          <div class="pipe-step">2. OCR / HTR</div>
-          <div class="pipe-step">3. Verify</div>
-          <div class="pipe-step">4. Annotate</div>
-          <div class="pipe-step">5. Add to corpus</div>
+        <div id="uploadPreview" class="upload-preview empty">Select a file to preview its metadata.</div>
+
+        <div class="step-actions right">
+          <button id="uploadToProcess" type="button" class="primary-btn">Continue to OCR / HTR →</button>
+        </div>
+      </div>
+
+      <div class="panel upload-step-panel" data-upload-panel="2">
+        <div class="step-heading">
+          <div>
+            <h3>2. OCR / Handwriting recognition</h3>
+            <p class="subtext">Text files are extracted locally. Image/PDF OCR and HTR will be connected to the recognition service later.</p>
+          </div>
+          <span id="processingRoute" class="status-pill">Awaiting file</span>
         </div>
 
-        <div id="uploadPreview" class="upload-preview empty">
-          Select a file to preview its metadata.
+        <div class="processing-grid">
+          <div>
+            <h4>Source preview</h4>
+            <div id="sourcePreview" class="source-preview empty">No document selected.</div>
+          </div>
+          <div>
+            <h4>Machine transcription</h4>
+            <textarea id="machineText" class="tamil transcription-box" placeholder="OCR / HTR output will appear here. For the prototype you can paste or type a transcription manually."></textarea>
+            <div class="small">The learner's original spelling and errors should be preserved at this stage.</div>
+          </div>
+        </div>
+
+        <div class="step-actions">
+          <button type="button" data-prev-step="1">← Back</button>
+          <button id="uploadToVerify" type="button" class="primary-btn">Continue to verification →</button>
+        </div>
+      </div>
+
+      <div class="panel upload-step-panel" data-upload-panel="3">
+        <h3>3. Verify transcription</h3>
+        <p class="subtext">Check the transcription against the original document. Do not silently correct learner errors.</p>
+
+        <div class="processing-grid">
+          <div>
+            <h4>Source preview</h4>
+            <div id="verifySourcePreview" class="source-preview empty">No document selected.</div>
+          </div>
+          <div>
+            <h4>Verified learner text</h4>
+            <textarea id="verifiedText" class="tamil transcription-box" placeholder="Verified learner transcription"></textarea>
+            <label class="check-row">
+              <input id="verificationChecked" type="checkbox" />
+              <span>I have checked this transcription against the source.</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="step-actions">
+          <button type="button" data-prev-step="2">← Back</button>
+          <button id="uploadToAnnotate" type="button" class="primary-btn">Continue to annotation →</button>
+        </div>
+      </div>
+
+      <div class="panel upload-step-panel" data-upload-panel="4">
+        <h3>4. Add annotations</h3>
+        <p class="subtext">Add learner-language or error annotations. You can skip this step and annotate later.</p>
+
+        <div class="form-grid annotation-form">
+          <label>
+            Learner form
+            <input id="annotationText" class="tamil" type="text" placeholder="Form in learner text" />
+          </label>
+          <label>
+            Category
+            <select id="annotationCategory">
+              <option>Spelling</option>
+              <option>Grammar</option>
+              <option>Word Choice</option>
+              <option>Usage</option>
+              <option>Punctuation</option>
+              <option>Morphology</option>
+              <option>Syntax</option>
+              <option>Vocabulary</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <label>
+            Suggested / standard form
+            <input id="annotationSuggested" class="tamil" type="text" placeholder="Optional" />
+          </label>
+          <label>
+            Note
+            <input id="annotationNote" type="text" placeholder="Optional annotation note" />
+          </label>
+        </div>
+
+        <button id="addAnnotationBtn" type="button">+ Add annotation</button>
+        <div id="draftAnnotationList" class="annotation-draft-list"></div>
+
+        <div class="step-actions">
+          <button type="button" data-prev-step="3">← Back</button>
+          <button id="uploadToReview" type="button" class="primary-btn">Review corpus record →</button>
+        </div>
+      </div>
+
+      <div class="panel upload-step-panel" data-upload-panel="5">
+        <h3>5. Review corpus record</h3>
+        <p class="subtext">This prototype does not write to the live corpus database yet. Export the record as JSON for review or GitHub-based collaboration.</p>
+
+        <div id="recordReview"></div>
+
+        <div class="step-actions wrap-actions">
+          <button type="button" data-prev-step="4">← Back</button>
+          <button id="copyRecordBtn" type="button">Copy JSON</button>
+          <button id="downloadRecordBtn" type="button" class="primary-btn">Download record JSON</button>
+          <button id="resetUploadBtn" type="button">Start another document</button>
         </div>
       </div>
     </section>
