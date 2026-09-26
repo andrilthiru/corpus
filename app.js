@@ -821,6 +821,38 @@ window.openDocument = function (id) {
 let uploadCurrentStep = 1;
 let uploadObjectUrl = null;
 let draftAnnotations = [];
+let importedTranscriptionReview = null;
+
+function reviewLines() {
+  return Array.isArray(importedTranscriptionReview?.lines)
+    ? importedTranscriptionReview.lines
+    : [];
+}
+
+function reviewLineText(line) {
+  return (line?.review?.verified_text ?? line?.primary_ocr?.raw_text ?? "").trim();
+}
+
+function consolidatedVerifiedText() {
+  if (!importedTranscriptionReview) return $("verifiedText").value;
+
+  return reviewLines()
+    .filter((line) => line?.review?.include_in_corpus !== false && line?.review?.status === "CONFIRMED")
+    .map(reviewLineText)
+    .filter(Boolean)
+    .join("\n");
+}
+
+function transcriptionVerified() {
+  if (!importedTranscriptionReview) return $("verificationChecked").checked;
+  const included = reviewLines().filter((line) => line?.review?.include_in_corpus !== false);
+  return included.length > 0 && included.every((line) => line?.review?.status === "CONFIRMED");
+}
+
+function reviewExportSnapshot() {
+  if (!importedTranscriptionReview) return null;
+  return JSON.parse(JSON.stringify(importedTranscriptionReview));
+}
 
 function currentUploadRecord() {
   return {
@@ -833,7 +865,9 @@ function currentUploadRecord() {
     title: $("uploadTitle").value.trim() || "Untitled",
     source_type: $("uploadSourceType").value,
     source_filename: $("uploadFile").files?.[0]?.name || "",
-    text: $("verifiedText").value,
+    text: consolidatedVerifiedText(),
+    transcription_verified: transcriptionVerified(),
+    transcription_review: reviewExportSnapshot(),
     annotations: draftAnnotations
   };
 }
@@ -850,6 +884,201 @@ function goUploadStep(step) {
   });
 
   if (uploadCurrentStep === 5) renderRecordReview();
+}
+
+function normaliseImportedReview(parsed) {
+  if (!parsed || !Array.isArray(parsed.lines)) {
+    throw new Error("This JSON does not contain a transcription-review lines array.");
+  }
+
+  const clone = JSON.parse(JSON.stringify(parsed));
+
+  clone.lines.forEach((line, index) => {
+    line.line_id = line.line_id || `LINE-${index + 1}`;
+    line.primary_ocr = line.primary_ocr || {};
+    line.review = line.review || {};
+    line.visual_review = line.visual_review || {};
+    line.review.include_in_corpus = line.review.include_in_corpus !== false;
+    line.review.needs_alternative_ocr = Boolean(line.review.needs_alternative_ocr);
+    line.review.status = line.review.status || "PENDING";
+    if (line.review.verified_text == null) line.review.verified_text = line.primary_ocr.raw_text || "";
+  });
+
+  return clone;
+}
+
+function updateRecognitionImportStatus() {
+  const target = $("recognitionImportStatus");
+  if (!importedTranscriptionReview) {
+    target.className = "recognition-status empty";
+    target.textContent = "No recognition review JSON loaded.";
+    return;
+  }
+
+  const lines = reviewLines();
+  const superLow = lines.filter((line) => line?.primary_ocr?.confidence_band === "SUPER_LOW").length;
+  const low = lines.filter((line) => line?.primary_ocr?.confidence_band === "LOW").length;
+  const highPriority = lines.filter((line) => line?.review?.priority === "HIGH").length;
+
+  target.className = "recognition-status loaded";
+  target.innerHTML = `
+    <strong>Recognition review loaded</strong><br>
+    <span class="small">
+      ${lines.length} region(s) · ${superLow} super-low confidence · ${low} low confidence · ${highPriority} high-priority review
+    </span>
+  `;
+}
+
+async function loadRecognitionReviewFile() {
+  const file = $("recognitionJsonFile").files?.[0];
+  if (!file) {
+    importedTranscriptionReview = null;
+    updateRecognitionImportStatus();
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(await file.text());
+    importedTranscriptionReview = normaliseImportedReview(parsed);
+
+    $("machineText").value = reviewLines()
+      .map((line) => line?.primary_ocr?.raw_text || "")
+      .filter(Boolean)
+      .join("\n");
+
+    updateRecognitionImportStatus();
+    renderStructuredReview();
+  } catch (error) {
+    importedTranscriptionReview = null;
+    $("recognitionJsonFile").value = "";
+    updateRecognitionImportStatus();
+    alert(`Could not load recognition JSON: ${error.message}`);
+  }
+}
+
+function reviewBandClass(band = "UNKNOWN") {
+  return `band-${String(band).toLowerCase().replace(/[^a-z_]/g, "-")}`;
+}
+
+function renderStructuredReview() {
+  const structured = $("structuredReviewMode");
+  const simple = $("simpleReviewMode");
+
+  if (!importedTranscriptionReview) {
+    structured.classList.add("hidden");
+    simple.classList.remove("hidden");
+    $("reviewProgress").textContent = "Manual verification";
+    renderSourcePreview("simpleVerifySourcePreview");
+    return;
+  }
+
+  structured.classList.remove("hidden");
+  simple.classList.add("hidden");
+  renderSourcePreview("verifySourcePreview");
+
+  const lines = reviewLines();
+  const list = $("lineReviewList");
+
+  list.innerHTML = lines.map((line, index) => {
+    const raw = line?.primary_ocr?.raw_text || "";
+    const band = line?.primary_ocr?.confidence_band || "UNKNOWN";
+    const conf = line?.primary_ocr?.block_confidence;
+    const legibility = line?.visual_review?.legibility_score;
+    const priority = line?.review?.priority || "NORMAL";
+    const included = line?.review?.include_in_corpus !== false;
+    const alt = Boolean(line?.review?.needs_alternative_ocr);
+    const confirmed = line?.review?.status === "CONFIRMED";
+    const flags = Array.isArray(line?.review?.flags) ? line.review.flags : [];
+
+    return `
+      <article class="line-review-card ${confirmed ? "confirmed" : ""}" data-review-index="${index}">
+        <div class="line-review-head">
+          <div>
+            <strong>${escapeHtml(line.line_id || `Line ${index + 1}`)}</strong>
+            <span class="priority-chip priority-${escapeHtml(priority.toLowerCase())}">${escapeHtml(priority)} review</span>
+          </div>
+          <div class="review-signals">
+            <span class="confidence-chip ${reviewBandClass(band)}">${escapeHtml(band)}${typeof conf === "number" ? ` · ${conf.toFixed(3)}` : ""}</span>
+            ${typeof legibility === "number" ? `<span>Legibility ${Math.round(legibility)}/100</span>` : ""}
+          </div>
+        </div>
+
+        ${flags.length ? `<div class="line-flags">${flags.map((flag) => `<span>${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+
+        <label>Raw Sarvam transcription</label>
+        <div class="raw-transcription tamil">${escapeHtml(raw)}</div>
+
+        <label>Verified transcription</label>
+        <textarea class="line-verified tamil" data-field="verified">${escapeHtml(line?.review?.verified_text ?? raw)}</textarea>
+
+        <div class="line-review-options">
+          <label><input type="checkbox" data-field="include" ${included ? "checked" : ""}> Include in corpus</label>
+          <label><input type="checkbox" data-field="alternative" ${alt ? "checked" : ""}> Needs alternative OCR</label>
+          <label><input type="checkbox" data-field="confirmed" ${confirmed ? "checked" : ""}> Confirm reviewed</label>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-review-index]").forEach((card) => {
+    const index = Number(card.dataset.reviewIndex);
+    const line = lines[index];
+
+    card.querySelector('[data-field="verified"]').addEventListener("input", (event) => {
+      line.review.verified_text = event.target.value;
+    });
+
+    card.querySelector('[data-field="include"]').addEventListener("change", (event) => {
+      line.review.include_in_corpus = event.target.checked;
+      updateReviewProgress();
+    });
+
+    card.querySelector('[data-field="alternative"]').addEventListener("change", (event) => {
+      line.review.needs_alternative_ocr = event.target.checked;
+    });
+
+    card.querySelector('[data-field="confirmed"]').addEventListener("change", (event) => {
+      line.review.status = event.target.checked ? "CONFIRMED" : "PENDING";
+      card.classList.toggle("confirmed", event.target.checked);
+      updateReviewProgress();
+    });
+  });
+
+  updateReviewProgress();
+}
+
+function updateReviewProgress() {
+  if (!importedTranscriptionReview) {
+    $("reviewProgress").textContent = "Manual verification";
+    return;
+  }
+
+  const lines = reviewLines();
+  const included = lines.filter((line) => line?.review?.include_in_corpus !== false);
+  const confirmed = included.filter((line) => line?.review?.status === "CONFIRMED");
+  const ignored = lines.length - included.length;
+  const alt = lines.filter((line) => line?.review?.needs_alternative_ocr).length;
+
+  $("reviewProgress").textContent = `${confirmed.length}/${included.length} included confirmed`;
+  $("reviewSummary").innerHTML = `
+    <strong>${included.length}</strong> included ·
+    <strong>${confirmed.length}</strong> confirmed ·
+    <strong>${ignored}</strong> ignored ·
+    <strong>${alt}</strong> marked for alternative OCR
+  `;
+
+  $("verificationChecked").checked = included.length > 0 && confirmed.length === included.length;
+  $("verifiedText").value = consolidatedVerifiedText();
+}
+
+function confirmAllIncludedLines() {
+  if (!importedTranscriptionReview) return;
+
+  reviewLines().forEach((line) => {
+    if (line?.review?.include_in_corpus !== false) line.review.status = "CONFIRMED";
+  });
+
+  renderStructuredReview();
 }
 
 function detectProcessingRoute(file) {
@@ -932,6 +1161,7 @@ async function loadSelectedFile() {
   $("processingRoute").textContent = detectProcessingRoute(file);
   renderSourcePreview("sourcePreview");
   renderSourcePreview("verifySourcePreview");
+  renderSourcePreview("simpleVerifySourcePreview");
   updateUploadPreview();
 }
 
@@ -1029,7 +1259,7 @@ function renderRecordReview() {
         <div class="small">
           <strong>Verified words:</strong> ${countWords(record.text)}<br>
           <strong>Annotations:</strong> ${record.annotations.length}<br>
-          <strong>Verification:</strong> ${$("verificationChecked").checked ? "Confirmed" : "Not confirmed"}
+          <strong>Verification:</strong> ${transcriptionVerified() ? "Confirmed" : "Not confirmed"}
         </div>
       </div>
     </div>
@@ -1071,6 +1301,8 @@ function resetUploadWorkflow() {
   $("uploadPrompt").value = "";
   $("uploadSourceType").value = "auto";
   $("uploadFile").value = "";
+  $("recognitionJsonFile").value = "";
+  importedTranscriptionReview = null;
   $("machineText").value = "";
   $("verifiedText").value = "";
   $("verificationChecked").checked = false;
@@ -1080,6 +1312,9 @@ function resetUploadWorkflow() {
   $("processingRoute").textContent = "Awaiting file";
   renderSourcePreview("sourcePreview");
   renderSourcePreview("verifySourcePreview");
+  renderSourcePreview("simpleVerifySourcePreview");
+  updateRecognitionImportStatus();
+  renderStructuredReview();
   goUploadStep(1);
 }
 
@@ -1149,6 +1384,7 @@ function wireNavigation() {
   });
 
   $("uploadFile").addEventListener("change", loadSelectedFile);
+  $("recognitionJsonFile").addEventListener("change", loadRecognitionReviewFile);
 
   $("uploadToProcess").addEventListener("click", async () => {
     if (!$("uploadFile").files?.[0]) {
@@ -1160,12 +1396,34 @@ function wireNavigation() {
   });
 
   $("uploadToVerify").addEventListener("click", () => {
-    $("verifiedText").value = $("machineText").value;
-    renderSourcePreview("verifySourcePreview");
+    if (!importedTranscriptionReview) {
+      $("verifiedText").value = $("machineText").value;
+    }
+    renderStructuredReview();
     goUploadStep(3);
   });
 
   $("uploadToAnnotate").addEventListener("click", () => {
+    if (importedTranscriptionReview) {
+      const included = reviewLines().filter((line) => line?.review?.include_in_corpus !== false);
+      const pending = included.filter((line) => line?.review?.status !== "CONFIRMED");
+
+      if (!included.length) {
+        alert("No learner-text regions are currently included in the corpus.");
+        return;
+      }
+
+      if (pending.length) {
+        alert(`${pending.length} included line(s) still need transcription confirmation.`);
+        return;
+      }
+
+      $("verifiedText").value = consolidatedVerifiedText();
+      $("verificationChecked").checked = true;
+      goUploadStep(4);
+      return;
+    }
+
     if (!$("verifiedText").value.trim()) {
       alert("Enter or verify the learner transcription before continuing.");
       return;
@@ -1177,6 +1435,8 @@ function wireNavigation() {
     goUploadStep(4);
   });
 
+  $("confirmIncludedLinesBtn").addEventListener("click", confirmAllIncludedLines);
+
   $("addAnnotationBtn").addEventListener("click", addDraftAnnotation);
   $("uploadToReview").addEventListener("click", () => goUploadStep(5));
   $("downloadRecordBtn").addEventListener("click", downloadRecordJson);
@@ -1184,6 +1444,8 @@ function wireNavigation() {
   $("resetUploadBtn").addEventListener("click", resetUploadWorkflow);
 
   renderDraftAnnotations();
+  updateRecognitionImportStatus();
+  renderStructuredReview();
   goUploadStep(1);
 
   $("closeDialog").addEventListener("click", () => $("docDialog").close());

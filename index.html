@@ -75,9 +75,9 @@
       <div class="pipeline" id="uploadPipeline">
         <button class="pipe-step active" type="button" data-upload-step="1">1. Upload</button>
         <button class="pipe-step" type="button" data-upload-step="2">2. OCR / HTR</button>
-        <button class="pipe-step" type="button" data-upload-step="3">3. Verify</button>
-        <button class="pipe-step" type="button" data-upload-step="4">4. Annotate</button>
-        <button class="pipe-step" type="button" data-upload-step="5">5. Review</button>
+        <button class="pipe-step" type="button" data-upload-step="3">3. Transcription Review</button>
+        <button class="pipe-step" type="button" data-upload-step="4">4. Error Annotation</button>
+        <button class="pipe-step" type="button" data-upload-step="5">5. Record Review</button>
       </div>
 
       <div class="panel upload-step-panel active" data-upload-panel="1">
@@ -159,7 +159,7 @@
         <div class="step-heading">
           <div>
             <h3>2. OCR / Handwriting recognition</h3>
-            <p class="subtext">Text files are extracted locally. Image/PDF OCR and HTR will be connected to the recognition service later.</p>
+            <p class="subtext">For the current prototype, run the Sarvam + Surya recognition notebook externally, then import its transcription review JSON here. The production platform can later call the same processing service through a secure backend.</p>
           </div>
           <span id="processingRoute" class="status-pill">Awaiting file</span>
         </div>
@@ -170,9 +170,17 @@
             <div id="sourcePreview" class="source-preview empty">No document selected.</div>
           </div>
           <div>
-            <h4>Machine transcription</h4>
-            <textarea id="machineText" class="tamil transcription-box" placeholder="OCR / HTR output will appear here. For the prototype you can paste or type a transcription manually."></textarea>
-            <div class="small">The learner's original spelling and errors should be preserved at this stage.</div>
+            <h4>Recognition result</h4>
+            <label class="recognition-import">
+              Import transcription review JSON
+              <input id="recognitionJsonFile" type="file" accept=".json,application/json" />
+            </label>
+            <div id="recognitionImportStatus" class="recognition-status empty">No recognition review JSON loaded.</div>
+            <details class="machine-fallback">
+              <summary>Manual / fallback machine transcription</summary>
+              <textarea id="machineText" class="tamil transcription-box compact" placeholder="Paste OCR / HTR text here only if a structured recognition JSON is not available."></textarea>
+            </details>
+            <div class="small">Raw OCR must remain unchanged. Corrections belong only in the verified transcription during Stage 3.</div>
           </div>
         </div>
 
@@ -183,13 +191,42 @@
       </div>
 
       <div class="panel upload-step-panel" data-upload-panel="3">
-        <h3>3. Verify transcription</h3>
-        <p class="subtext">Check the transcription against the original document. Do not silently correct learner errors.</p>
+        <div class="step-heading">
+          <div>
+            <h3>3. Transcription Review</h3>
+            <p class="subtext">Compare every learner-text region with the original source. Confidence and legibility are review aids only; even high-confidence OCR is not auto-accepted.</p>
+          </div>
+          <span id="reviewProgress" class="status-pill">Awaiting recognition</span>
+        </div>
 
-        <div class="processing-grid">
+        <div id="structuredReviewMode" class="structured-review hidden">
+          <div class="transcription-review-layout">
+            <div class="review-source-column">
+              <h4>Original source</h4>
+              <div id="verifySourcePreview" class="source-preview sticky-preview empty">No document selected.</div>
+              <div class="review-legend">
+                <strong>Review guide</strong>
+                <span><b>SUPER LOW</b> &lt; 0.60</span>
+                <span><b>LOW</b> 0.60–0.80</span>
+                <span><b>NORMAL</b> 0.80–0.90</span>
+                <span><b>HIGH</b> ≥ 0.90</span>
+                <small>High confidence still requires human verification.</small>
+              </div>
+            </div>
+            <div>
+              <div class="review-toolbar">
+                <div id="reviewSummary" class="small"></div>
+                <button id="confirmIncludedLinesBtn" type="button">Confirm all included lines</button>
+              </div>
+              <div id="lineReviewList" class="line-review-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="simpleReviewMode" class="processing-grid">
           <div>
             <h4>Source preview</h4>
-            <div id="verifySourcePreview" class="source-preview empty">No document selected.</div>
+            <div id="simpleVerifySourcePreview" class="source-preview empty">No document selected.</div>
           </div>
           <div>
             <h4>Verified learner text</h4>
@@ -203,13 +240,13 @@
 
         <div class="step-actions">
           <button type="button" data-prev-step="2">← Back</button>
-          <button id="uploadToAnnotate" type="button" class="primary-btn">Continue to annotation →</button>
+          <button id="uploadToAnnotate" type="button" class="primary-btn">Continue to error annotation →</button>
         </div>
       </div>
 
       <div class="panel upload-step-panel" data-upload-panel="4">
-        <h3>4. Add annotations</h3>
-        <p class="subtext">Add learner-language or error annotations. You can skip this step and annotate later.</p>
+        <h3>4. Error Detection & Annotation</h3>
+        <p class="subtext">Stage 2 operates only on the human-verified transcription. For now, add or review learner-language error annotations manually; automated candidate detection can be connected next.</p>
 
         <div class="form-grid annotation-form">
           <label>
