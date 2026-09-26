@@ -11,3 +11,5 @@ regex
 httpx
 
 google-cloud-vision>=3.10
+
+google-genai>=1.0

@@ -27,3 +27,10 @@ The API returns Sarvam as primary OCR, Google as secondary OCR, and line-level d
 Google text comparison is line-based. Within each Surya line, Google words are sorted
 left-to-right. Model disagreement is based on exact normalized character disagreement
 (after ignoring spacing and punctuation), not a coarse paragraph similarity threshold.
+
+
+## v0.11
+- `/api/transcribe-page` now returns a compressed page preview for exact review highlighting.
+- `/api/detect-errors` runs Sarvam-105B + Gemini 3.5 Flash + deterministic rules.
+- Automatic linguistic findings are candidates only and require human acceptance.
+- Gemini uses Vertex AI Application Default Credentials; no Gemini API key is stored in GitHub.

@@ -657,6 +657,78 @@ function renderAnalyze() {
   $("analyzeOutput").innerHTML = html;
 }
 
+
+function svgBarChart(title, rows, { illustrative = false } = {}) {
+  const width = 760;
+  const height = Math.max(250, 70 + rows.length * 44);
+  const left = 150;
+  const right = 35;
+  const top = 48;
+  const rowH = 36;
+  const usable = width - left - right;
+  const max = Math.max(1, ...rows.map((r) => Number(r.value || 0)));
+
+  return `
+    <div class="insight-chart-card">
+      <div class="chart-title-row">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          ${illustrative ? '<div class="small">Illustrative demo data only — not a corpus finding.</div>' : ""}
+        </div>
+      </div>
+      <svg class="insight-svg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
+        ${rows.map((r, i) => {
+          const y = top + i * rowH;
+          const barW = (Number(r.value || 0) / max) * usable;
+          return `
+            <text x="${left - 12}" y="${y + 17}" text-anchor="end" class="chart-label">${escapeHtml(r.label)}</text>
+            <rect x="${left}" y="${y}" width="${usable}" height="24" rx="5" class="chart-track-svg"></rect>
+            <rect x="${left}" y="${y}" width="${Math.max(2, barW)}" height="24" rx="5" class="chart-bar-svg"></rect>
+            <text x="${Math.min(width - 8, left + barW + 8)}" y="${y + 17}" class="chart-value">${Number(r.value || 0).toFixed(r.decimals ?? 0)}</text>
+          `;
+        }).join("")}
+      </svg>
+    </div>
+  `;
+}
+
+function svgLineChart(title, rows, { illustrative = false, suffix = "" } = {}) {
+  const width = 760;
+  const height = 300;
+  const left = 55;
+  const right = 30;
+  const top = 45;
+  const bottom = 55;
+  const usableW = width - left - right;
+  const usableH = height - top - bottom;
+  const max = Math.max(1, ...rows.map((r) => Number(r.value || 0)));
+  const points = rows.map((r, i) => {
+    const x = left + (rows.length <= 1 ? usableW / 2 : (i / (rows.length - 1)) * usableW);
+    const y = top + usableH - (Number(r.value || 0) / max) * usableH;
+    return { ...r, x, y };
+  });
+
+  return `
+    <div class="insight-chart-card">
+      <div class="chart-title-row">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          ${illustrative ? '<div class="small">Illustrative demo data only — not a corpus finding.</div>' : ""}
+        </div>
+      </div>
+      <svg class="insight-svg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
+        <line x1="${left}" y1="${top + usableH}" x2="${width - right}" y2="${top + usableH}" class="chart-axis"></line>
+        <polyline points="${points.map((p) => `${p.x},${p.y}`).join(" ")}" class="chart-line" fill="none"></polyline>
+        ${points.map((p) => `
+          <circle cx="${p.x}" cy="${p.y}" r="5" class="chart-point"></circle>
+          <text x="${p.x}" y="${p.y - 12}" text-anchor="middle" class="chart-value">${Number(p.value).toFixed(1)}${escapeHtml(suffix)}</text>
+          <text x="${p.x}" y="${top + usableH + 28}" text-anchor="middle" class="chart-label">${escapeHtml(p.label)}</text>
+        `).join("")}
+      </svg>
+    </div>
+  `;
+}
+
 function renderInsights() {
   const docs = docsFor(insightLevel);
   const words = docs.reduce((sum, d) => sum + countWords(d.text || ""), 0);
@@ -679,6 +751,42 @@ function renderInsights() {
         <div class="insight-card"><span>Annotations</span><strong>${anns}</strong></div>
         <div class="insight-card"><span>Annotations / 1,000 words</span><strong>${words ? ((anns / words) * 1000).toFixed(1) : "0.0"}</strong></div>
         <div class="insight-card"><span>Text / task types</span><strong>${new Set(docs.map((d) => d.task).filter(Boolean)).size}</strong></div>
+      </div>
+
+      <div class="insight-chart-grid">
+        ${(() => {
+          const actual = Object.entries(categoryCounts).sort((x, y) => y[1] - x[1]).slice(0, 6);
+          const rows = actual.length
+            ? actual.map(([label, value]) => ({ label: prettyCategory(label), value }))
+            : [
+                { label: "Spelling", value: 18 },
+                { label: "Grammar", value: 11 },
+                { label: "Punctuation", value: 8 },
+                { label: "Word choice", value: 6 },
+                { label: "Extra word", value: 4 }
+              ];
+          return svgBarChart("Most frequent annotation categories", rows, { illustrative: !actual.length });
+        })()}
+
+        ${(() => {
+          const levels = ["P4","P6","SEC2","SEC4","JC1","JC2"];
+          const actualRows = levels.map((level) => {
+            const ld = docsFor(level);
+            const lw = ld.reduce((sum, d) => sum + countWords(d.text || ""), 0);
+            const la = annotationCount(ld);
+            return { label: levelLabel(level).replace("Primary ", "P").replace("Secondary ", "Sec "), value: lw ? (la / lw) * 1000 : 0 };
+          });
+          const hasData = actualRows.some((r) => r.value > 0);
+          const rows = hasData ? actualRows : [
+            { label: "P4", value: 42.0 },
+            { label: "P6", value: 35.5 },
+            { label: "Sec 2", value: 29.0 },
+            { label: "Sec 4", value: 24.5 },
+            { label: "JC1", value: 20.0 },
+            { label: "JC2", value: 17.5 }
+          ];
+          return svgLineChart("Annotation rate by learner level", rows, { illustrative: !hasData, suffix: "" });
+        })()}
       </div>
     `;
     return;
@@ -823,6 +931,14 @@ let uploadObjectUrl = null;
 let draftAnnotations = [];
 let importedTranscriptionReview = null;
 let ocrProcessing = false;
+let ocrPageStates = [];
+let ocrRunSerial = 0;
+let currentOcrController = null;
+let reviewPage = 1;
+let reviewZoom = 1;
+let activeReviewLineId = null;
+let errorCandidates = [];
+let errorDetectionRunning = false;
 
 function reviewLines() {
   return Array.isArray(importedTranscriptionReview?.lines)
@@ -884,6 +1000,7 @@ function goUploadStep(step) {
     button.classList.toggle("active", Number(button.dataset.uploadStep) === uploadCurrentStep);
   });
 
+  if (uploadCurrentStep === 4) renderAnnotationWorkspace();
   if (uploadCurrentStep === 5) renderRecordReview();
 }
 
@@ -910,9 +1027,12 @@ function normaliseImportedReview(parsed) {
 
 function updateRecognitionImportStatus() {
   const target = $("recognitionImportStatus");
+
   if (!importedTranscriptionReview) {
-    target.className = "recognition-status empty";
-    target.textContent = "Recognition has not completed yet.";
+    target.className = ocrProcessing ? "recognition-status processing" : "recognition-status empty";
+    target.textContent = ocrProcessing
+      ? "Preparing page-by-page recognition…"
+      : "Recognition has not completed yet.";
     return;
   }
 
@@ -921,14 +1041,32 @@ function updateRecognitionImportStatus() {
   const low = lines.filter((line) => line?.primary_ocr?.confidence_band === "LOW").length;
   const highPriority = lines.filter((line) => line?.review?.priority === "HIGH").length;
 
-  target.className = "recognition-status loaded";
+  const totalPages = ocrPageStates.length || Number(importedTranscriptionReview.page_count || 0);
+  const readyPages = ocrPageStates.length ? ocrReadyPages() : totalPages;
+  const failedPages = ocrPageStates.length ? ocrFailedPages() : 0;
+
+  target.className = ocrProcessing ? "recognition-status processing" : "recognition-status loaded";
+
+  if (ocrProcessing) {
+    target.innerHTML = `
+      <strong>${readyPages}/${totalPages} page(s) ready for review</strong><br>
+      <span class="small">
+        ${lines.length} region(s) loaded so far. You can open Transcription Review now while later pages continue processing.
+      </span>
+    `;
+    return;
+  }
+
   target.innerHTML = `
-    <strong>Recognition review loaded</strong><br>
+    <strong>${failedPages ? "Recognition partially complete" : "Recognition review loaded"}</strong><br>
     <span class="small">
+      ${readyPages}/${totalPages || readyPages} page(s) ready ·
       ${lines.length} region(s) · ${superLow} super-low confidence · ${low} low confidence · ${highPriority} high-priority review
+      ${failedPages ? ` · ${failedPages} page(s) need retry` : ""}
     </span>
   `;
 }
+
 
 async function loadRecognitionReviewFile() {
   const file = $("recognitionJsonFile").files?.[0];
@@ -962,19 +1100,288 @@ function ocrApiUrl() {
   return String(window.CORPUS_OCR_API_URL || "").replace(/\/$/, "");
 }
 
-function setOcrProcessing(active, message = "") {
-  ocrProcessing = active;
-  const progress = $("ocrProgress");
-  const retry = $("retryOcrBtn");
+function ocrReadyPages() {
+  return ocrPageStates.filter((x) => x.status === "ready").length;
+}
+
+function ocrFailedPages() {
+  return ocrPageStates.filter((x) => x.status === "failed").length;
+}
+
+function resetOcrPageProgress() {
+  ocrRunSerial += 1;
+  if (currentOcrController) {
+    try { currentOcrController.abort(); } catch {}
+  }
+  currentOcrController = null;
+  ocrPageStates = [];
+  ocrProcessing = false;
+  renderOcrProgress();
+}
+
+function renderOcrProgress() {
+  const wrap = $("ocrProgress");
+  const title = $("ocrProgressTitle");
+  const detail = $("ocrProgressDetail");
+  const count = $("ocrProgressCount");
+  const fill = $("ocrProgressFill");
+  const list = $("ocrPageStatusList");
+  const spinner = $("ocrSpinner");
   const next = $("uploadToVerify");
 
-  if (progress) progress.classList.toggle("hidden", !active);
-  if (retry) retry.classList.toggle("hidden", active || !message);
-  if (next) next.disabled = active || !importedTranscriptionReview;
+  const total = ocrPageStates.length;
+  const ready = ocrReadyPages();
+  const failed = ocrFailedPages();
+  const current = ocrPageStates.find((x) => x.status === "processing");
+  const completed = ready + failed;
+
+  if (wrap) wrap.classList.toggle("hidden", total === 0 && !ocrProcessing);
+  if (spinner) spinner.classList.toggle("hidden", !ocrProcessing);
+
+  if (count) count.textContent = total ? `${ready} / ${total} ready` : "0 / 0";
+  if (fill) fill.style.width = total ? `${Math.round((ready / total) * 100)}%` : "0%";
+
+  if (title) {
+    if (current) title.textContent = `Processing page ${current.page} of ${total}`;
+    else if (ocrProcessing) title.textContent = "Preparing document…";
+    else if (failed) title.textContent = `${ready} page(s) ready · ${failed} need retry`;
+    else if (total && ready === total) title.textContent = "Document recognition complete";
+    else title.textContent = "Recognition";
+  }
+
+  if (detail) {
+    if (current) {
+      detail.textContent = "Running Sarvam + Google Vision + Surya for this page.";
+    } else if (ocrProcessing) {
+      detail.textContent = "Determining page count.";
+    } else if (total) {
+      detail.textContent = failed
+        ? "Successful pages are available for review. Retry only the failed page(s)."
+        : "All pages are ready for transcription review.";
+    } else {
+      detail.textContent = "Recognition has not started.";
+    }
+  }
+
+  if (list) {
+    list.innerHTML = ocrPageStates.map((state) => {
+      const label = ({
+        waiting: "Waiting",
+        processing: "Processing",
+        ready: "Ready for review",
+        failed: "Failed"
+      })[state.status] || state.status;
+
+      const elapsed = typeof state.elapsed_seconds === "number"
+        ? ` · ${state.elapsed_seconds.toFixed(1)}s`
+        : "";
+
+      return `
+        <div class="ocr-page-row status-${escapeHtml(state.status)}">
+          <span class="ocr-page-dot" aria-hidden="true"></span>
+          <strong>Page ${state.page}</strong>
+          <span>${escapeHtml(label)}${elapsed}</span>
+          ${state.status === "failed" && !ocrProcessing
+            ? `<button type="button" class="ocr-page-retry" data-retry-page="${state.page}">Retry page</button>`
+            : ""}
+        </div>
+      `;
+    }).join("");
+
+    list.querySelectorAll("[data-retry-page]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const file = $("uploadFile").files?.[0];
+        if (!file) return;
+        await processSingleOcrPage(file, Number(button.dataset.retryPage), ocrRunSerial);
+        const remainingFailed = ocrFailedPages();
+        if (!remainingFailed && !ocrProcessing) updateRecognitionImportStatus();
+      });
+    });
+  }
+
+  if (next) next.disabled = reviewLines().length === 0;
+
+  const retryAll = $("retryOcrBtn");
+  if (retryAll) {
+    retryAll.classList.toggle("hidden", ocrProcessing || failed === 0);
+  }
+}
+
+function setOcrProcessing(active, message = "") {
+  ocrProcessing = active;
+  renderOcrProgress();
 
   if (message && $("recognitionImportStatus")) {
     $("recognitionImportStatus").className = "recognition-status error";
     $("recognitionImportStatus").textContent = message;
+  }
+}
+
+function makeIncrementalReview(pageCount, file) {
+  return normaliseImportedReview({
+    schema_version: "1.3-page-by-page-review",
+    document_id: $("uploadDocId").value.trim() || "DRAFT-001",
+    source_filename: file.name,
+    source_type: $("uploadSourceType").value || "auto",
+    page_count: pageCount,
+    page_previews: {},
+    pipeline: {
+      primary_ocr: "sarvam_vision_single_page",
+      secondary_ocr: "google_cloud_vision_single_page",
+      comparison: "sarvam_google_line_disagreement",
+      line_geometry: "surya",
+      processing_mode: "page_by_page",
+      manual_review_required: true
+    },
+    lines: []
+  });
+}
+
+function refreshMachineTextFromReview() {
+  $("machineText").value = reviewLines()
+    .map((line) => line?.primary_ocr?.raw_text || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function mergeOcrPagePayload(payload) {
+  if (!importedTranscriptionReview) return;
+
+  const pageNumber = Number(payload?.page_number);
+  const incoming = Array.isArray(payload?.lines)
+    ? normaliseImportedReview({ lines: payload.lines }).lines
+    : [];
+
+  importedTranscriptionReview.lines = reviewLines()
+    .filter((line) => Number(line?.page_number) !== pageNumber)
+    .concat(incoming)
+    .sort((x, y) => {
+      const px = Number(x?.page_number || 0);
+      const py = Number(y?.page_number || 0);
+      if (px !== py) return px - py;
+      return String(x?.line_id || "").localeCompare(String(y?.line_id || ""), undefined, { numeric: true });
+    });
+
+  importedTranscriptionReview.page_count = Number(payload?.page_count || importedTranscriptionReview.page_count || 1);
+  importedTranscriptionReview.page_previews = importedTranscriptionReview.page_previews || {};
+  if (payload?.page_preview) {
+    importedTranscriptionReview.page_previews[String(pageNumber)] = payload.page_preview;
+  }
+  refreshMachineTextFromReview();
+}
+
+function rerenderReviewPreservingEditor() {
+  if (uploadCurrentStep !== 3) return;
+
+  const active = document.activeElement;
+  let lineId = null;
+  let selectionStart = null;
+  let selectionEnd = null;
+
+  if (active?.classList?.contains("line-verified")) {
+    const card = active.closest("[data-review-index]");
+    const idx = card ? Number(card.dataset.reviewIndex) : -1;
+    lineId = reviewLines()[idx]?.line_id || null;
+    selectionStart = active.selectionStart;
+    selectionEnd = active.selectionEnd;
+  }
+
+  const scrollY = window.scrollY;
+  renderStructuredReview();
+
+  if (lineId) {
+    const idx = reviewLines().findIndex((line) => line?.line_id === lineId);
+    const textarea = idx >= 0
+      ? document.querySelector(`[data-review-index="${idx}"] .line-verified`)
+      : null;
+    if (textarea) {
+      textarea.focus({ preventScroll: true });
+      if (selectionStart != null && selectionEnd != null) {
+        textarea.setSelectionRange(selectionStart, selectionEnd);
+      }
+    }
+  }
+
+  window.scrollTo({ top: scrollY, behavior: "instant" });
+}
+
+async function fetchPageCount(base, file, controller) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+
+  const response = await fetch(`${base}/api/page-count`, {
+    method: "POST",
+    body: form,
+    signal: controller.signal
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.detail || `Page-count service returned HTTP ${response.status}`);
+  }
+  const n = Number(payload?.page_count);
+  if (!Number.isInteger(n) || n < 1) throw new Error("OCR service returned an invalid page count.");
+  return n;
+}
+
+async function processSingleOcrPage(file, pageNumber, runSerial) {
+  const base = ocrApiUrl();
+  const state = ocrPageStates.find((x) => x.page === pageNumber);
+  if (!state) return false;
+
+  state.status = "processing";
+  state.error = "";
+  renderOcrProgress();
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("page_number", String(pageNumber));
+  form.append("document_id", $("uploadDocId").value.trim() || "DRAFT-001");
+  form.append("source_type", $("uploadSourceType").value || "auto");
+
+  const controller = new AbortController();
+  currentOcrController = controller;
+
+  try {
+    const response = await fetch(`${base}/api/transcribe-page`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    let payload = null;
+    if (contentType.includes("application/json")) {
+      payload = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(text || `OCR service returned HTTP ${response.status}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.detail || payload?.error || `OCR service returned HTTP ${response.status}`);
+    }
+
+    if (runSerial !== ocrRunSerial) return false;
+
+    mergeOcrPagePayload(payload);
+    state.status = "ready";
+    state.elapsed_seconds = Number(payload?.elapsed_seconds);
+    state.error = "";
+
+    updateRecognitionImportStatus();
+    renderOcrProgress();
+    rerenderReviewPreservingEditor();
+    return true;
+  } catch (error) {
+    if (runSerial !== ocrRunSerial || error?.name === "AbortError") return false;
+    state.status = "failed";
+    state.error = error.message;
+    renderOcrProgress();
+    updateRecognitionImportStatus();
+    return false;
+  } finally {
+    if (currentOcrController === controller) currentOcrController = null;
   }
 }
 
@@ -987,7 +1394,6 @@ async function processRecognitionAutomatically() {
 
   const lower = file.name.toLowerCase();
   if (lower.endsWith(".txt") || lower.endsWith(".json") || lower.endsWith(".docx")) {
-    // Digital-text paths keep the existing manual extraction flow.
     return false;
   }
 
@@ -998,55 +1404,307 @@ async function processRecognitionAutomatically() {
     return false;
   }
 
+  resetOcrPageProgress();
+  const runSerial = ocrRunSerial;
   importedTranscriptionReview = null;
   updateRecognitionImportStatus();
+
   $("recognitionImportStatus").className = "recognition-status processing";
-  $("recognitionImportStatus").textContent = "Processing uploaded document automatically…";
+  $("recognitionImportStatus").textContent = "Preparing page-by-page recognition…";
   setOcrProcessing(true);
 
-  const form = new FormData();
-  form.append("file", file, file.name);
-  form.append("document_id", $("uploadDocId").value.trim() || "DRAFT-001");
-  form.append("source_type", $("uploadSourceType").value || "auto");
+  const countController = new AbortController();
+  currentOcrController = countController;
 
   try {
-    const response = await fetch(`${base}/api/transcribe`, {
-      method: "POST",
-      body: form
-    });
+    const pageCount = await fetchPageCount(base, file, countController);
+    if (runSerial !== ocrRunSerial) return false;
 
-    let payload = null;
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      payload = await response.json();
-    } else {
-      const text = await response.text();
-      throw new Error(text || `OCR service returned HTTP ${response.status}`);
-    }
-
-    if (!response.ok) {
-      throw new Error(payload?.detail || payload?.error || `OCR service returned HTTP ${response.status}`);
-    }
-
-    importedTranscriptionReview = normaliseImportedReview(payload);
-    $("machineText").value = reviewLines()
-      .map((line) => line?.primary_ocr?.raw_text || "")
-      .filter(Boolean)
-      .join("\n");
-
+    importedTranscriptionReview = makeIncrementalReview(pageCount, file);
+    ocrPageStates = Array.from({ length: pageCount }, (_, i) => ({
+      page: i + 1,
+      status: "waiting",
+      error: "",
+      elapsed_seconds: null
+    }));
+    renderOcrProgress();
     updateRecognitionImportStatus();
-    renderStructuredReview();
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      if (runSerial !== ocrRunSerial) return false;
+      await processSingleOcrPage(file, page, runSerial);
+    }
+
+    if (runSerial !== ocrRunSerial) return false;
     setOcrProcessing(false);
-    return true;
+    updateRecognitionImportStatus();
+    renderOcrProgress();
+    return ocrReadyPages() > 0;
   } catch (error) {
-    importedTranscriptionReview = null;
+    if (runSerial !== ocrRunSerial || error?.name === "AbortError") return false;
     setOcrProcessing(false, `Automatic OCR failed: ${error.message}`);
     return false;
+  } finally {
+    if (currentOcrController === countController) currentOcrController = null;
   }
 }
 
+
+
 function reviewBandClass(band = "UNKNOWN") {
   return `band-${String(band).toLowerCase().replace(/[^a-z_]/g, "-")}`;
+}
+
+function pageLines(page = reviewPage) {
+  return reviewLines().filter((line) => Number(line?.page_number || 1) === Number(page));
+}
+
+function reviewedLine(line) {
+  return line?.review?.status === "CONFIRMED" || line?.review?.status === "IGNORED";
+}
+
+function activePageLine() {
+  const lines = pageLines();
+  return lines.find((line) => line.line_id === activeReviewLineId)
+    || lines.find((line) => !reviewedLine(line))
+    || lines[0]
+    || null;
+}
+
+function polygonPoints(line, preview) {
+  const polygon = line?.geometry?.polygon;
+  if (!Array.isArray(polygon) || !polygon.length || !preview?.source_width || !preview?.source_height) return "";
+  const sx = Number(preview.display_width) / Number(preview.source_width);
+  const sy = Number(preview.display_height) / Number(preview.source_height);
+  return polygon.map((p) => `${Number(p[0]) * sx},${Number(p[1]) * sy}`).join(" ");
+}
+
+function setActiveReviewLine(lineId, { scroll = true } = {}) {
+  activeReviewLineId = lineId;
+  renderReviewPage();
+  renderActiveReviewCard();
+  renderPageReviewQueue();
+  if (scroll) requestAnimationFrame(scrollActiveRegionIntoView);
+}
+
+function autoAdvanceReview() {
+  const lines = pageLines();
+  const currentIndex = lines.findIndex((line) => line.line_id === activeReviewLineId);
+  const next = lines.slice(Math.max(0, currentIndex + 1)).find((line) => !reviewedLine(line))
+    || lines.find((line) => !reviewedLine(line));
+
+  if (next) {
+    setActiveReviewLine(next.line_id);
+    return;
+  }
+
+  const totalPages = Number(importedTranscriptionReview?.page_count || 1);
+  if (reviewPage < totalPages) {
+    reviewPage += 1;
+    const nextPage = pageLines(reviewPage);
+    activeReviewLineId = nextPage.find((line) => !reviewedLine(line))?.line_id || nextPage[0]?.line_id || null;
+    renderStructuredReview();
+  } else {
+    renderStructuredReview();
+  }
+}
+
+function applyReviewDecision(kind, value = "") {
+  const line = activePageLine();
+  if (!line) return;
+
+  line.review = line.review || {};
+
+  if (kind === "ignore") {
+    line.review.include_in_corpus = false;
+    line.review.status = "IGNORED";
+    line.review.verified_text = "";
+  } else {
+    const text = String(value || "").trim();
+    if (!text) {
+      alert("The verified transcription cannot be empty. Use Ignore for non-corpus content.");
+      return;
+    }
+    line.review.include_in_corpus = true;
+    line.review.verified_text = text;
+    line.review.status = "CONFIRMED";
+  }
+
+  updateReviewProgress();
+  autoAdvanceReview();
+}
+
+function scrollActiveRegionIntoView() {
+  const line = activePageLine();
+  const preview = importedTranscriptionReview?.page_previews?.[String(reviewPage)];
+  const viewport = $("reviewPageViewport");
+  const stage = $("reviewPageStage");
+  if (!line || !preview || !viewport || !stage) return;
+
+  const poly = line?.geometry?.polygon;
+  if (!Array.isArray(poly) || !poly.length) return;
+
+  const minY = Math.min(...poly.map((p) => Number(p[1])));
+  const sourceH = Number(preview.source_height || 1);
+  const renderedH = stage.scrollHeight || stage.offsetHeight || viewport.scrollHeight;
+  const targetY = (minY / sourceH) * renderedH;
+
+  viewport.scrollTo({
+    top: Math.max(0, targetY - viewport.clientHeight * 0.35),
+    behavior: "smooth"
+  });
+}
+
+function renderReviewPage() {
+  const totalPages = Number(importedTranscriptionReview?.page_count || 1);
+  reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
+  $("reviewPageLabel").textContent = `Page ${reviewPage} of ${totalPages}`;
+  $("reviewPrevPage").disabled = reviewPage <= 1;
+  $("reviewNextPage").disabled = reviewPage >= totalPages;
+
+  const preview = importedTranscriptionReview?.page_previews?.[String(reviewPage)];
+  const stage = $("reviewPageStage");
+  const lines = pageLines();
+  const active = activePageLine();
+
+  if (!preview?.data_url) {
+    stage.style.width = "100%";
+    stage.innerHTML = `
+      <div class="review-preview-fallback">
+        <div class="empty">This page does not yet have the v0.11 image preview.</div>
+        <div class="small">Reprocess this page after deploying v0.11 to enable exact handwriting highlights.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const width = Number(preview.display_width);
+  const height = Number(preview.display_height);
+  stage.style.width = `${Math.max(35, reviewZoom * 100)}%`;
+
+  stage.innerHTML = `
+    <div class="review-image-wrap" style="aspect-ratio:${width}/${height}">
+      <img src="${preview.data_url}" alt="Processed learner page ${reviewPage}" />
+      <svg class="review-overlay" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+        ${lines.map((line) => {
+          const points = polygonPoints(line, preview);
+          if (!points) return "";
+          const status = line?.review?.status || "PENDING";
+          const activeClass = active?.line_id === line.line_id ? "active" : "";
+          return `<polygon
+            points="${points}"
+            class="review-region ${activeClass} status-${escapeHtml(status.toLowerCase())}"
+            data-line-id="${escapeHtml(line.line_id)}"
+          ></polygon>`;
+        }).join("")}
+      </svg>
+    </div>
+  `;
+
+  stage.querySelectorAll("[data-line-id]").forEach((region) => {
+    region.addEventListener("click", () => setActiveReviewLine(region.dataset.lineId));
+  });
+}
+
+function renderActiveReviewCard() {
+  const target = $("activeReviewCard");
+  const line = activePageLine();
+
+  if (!line) {
+    target.innerHTML = '<div class="empty">No review items are available on this page yet.</div>';
+    return;
+  }
+
+  activeReviewLineId = line.line_id;
+
+  const aText = (line?.primary_ocr?.raw_text || "").trim();
+  const bText = (line?.secondary_ocr?.raw_text || "").trim();
+  const current = (line?.review?.verified_text ?? aText).trim();
+  const same = normalizeTamilText(aText).replace(/\s+/g, " ").trim() === normalizeTamilText(bText).replace(/\s+/g, " ").trim();
+  const flags = Array.isArray(line?.review?.flags) ? line.review.flags : [];
+  const status = line?.review?.status || "PENDING";
+
+  target.innerHTML = `
+    <article class="active-review-card">
+      <div class="active-review-head">
+        <div>
+          <strong>${escapeHtml(line.line_id)}</strong>
+          <span class="status-pill">${escapeHtml(status)}</span>
+        </div>
+        <button id="reviewDetailsToggle" type="button" class="text-button">Details</button>
+      </div>
+
+      <div class="ocr-choice-grid ${same || !bText ? "one-choice" : ""}">
+        <button type="button" class="ocr-choice" id="useOptionA">
+          <span class="choice-label">Option A</span>
+          <span class="tamil">${escapeHtml(aText || "No reading")}</span>
+        </button>
+        ${!same && bText ? `
+          <button type="button" class="ocr-choice" id="useOptionB">
+            <span class="choice-label">Option B</span>
+            <span class="tamil">${escapeHtml(bText)}</span>
+          </button>
+        ` : ""}
+      </div>
+
+      <label class="review-correction-label">
+        Correct / override
+        <textarea id="reviewCorrectionText" class="tamil review-correction">${escapeHtml(current)}</textarea>
+      </label>
+
+      <div class="review-action-row">
+        <button id="saveReviewCorrection" type="button" class="primary-btn">Save change</button>
+        <button id="ignoreReviewItem" type="button">Ignore</button>
+      </div>
+
+      <div id="reviewItemDetails" class="review-item-details hidden">
+        <div><strong>Option A engine:</strong> ${escapeHtml(line?.primary_ocr?.engine || "primary OCR")}</div>
+        <div><strong>Option B engine:</strong> ${escapeHtml(line?.secondary_ocr?.engine || "secondary OCR")}</div>
+        <div><strong>Priority:</strong> ${escapeHtml(line?.review?.priority || "NORMAL")}</div>
+        ${flags.length ? `<div><strong>Signals:</strong> ${flags.map(escapeHtml).join(", ")}</div>` : ""}
+      </div>
+    </article>
+  `;
+
+  $("useOptionA")?.addEventListener("click", () => applyReviewDecision("accept", aText));
+  $("useOptionB")?.addEventListener("click", () => applyReviewDecision("accept", bText));
+  $("saveReviewCorrection")?.addEventListener("click", () => applyReviewDecision("accept", $("reviewCorrectionText").value));
+  $("ignoreReviewItem")?.addEventListener("click", () => applyReviewDecision("ignore"));
+  $("reviewDetailsToggle")?.addEventListener("click", () => $("reviewItemDetails").classList.toggle("hidden"));
+
+  $("reviewCorrectionText")?.addEventListener("focus", () => {
+    renderReviewPage();
+    requestAnimationFrame(scrollActiveRegionIntoView);
+  });
+}
+
+function renderPageReviewQueue() {
+  const target = $("pageReviewQueue");
+  const lines = pageLines();
+  const reviewed = lines.filter(reviewedLine).length;
+  $("pageReviewProgress").textContent = `${reviewed} / ${lines.length} reviewed`;
+
+  if (!lines.length) {
+    target.innerHTML = '<div class="empty">No OCR regions on this page yet.</div>';
+    return;
+  }
+
+  target.innerHTML = lines.map((line, idx) => {
+    const active = line.line_id === activeReviewLineId;
+    const status = line?.review?.status || "PENDING";
+    const snippet = (line?.review?.verified_text ?? line?.primary_ocr?.raw_text ?? "").trim();
+    return `
+      <button type="button" class="page-review-item ${active ? "active" : ""} status-${escapeHtml(status.toLowerCase())}" data-page-line="${escapeHtml(line.line_id)}">
+        <span>${idx + 1}</span>
+        <span class="tamil">${escapeHtml(snippet || "Ignored / blank")}</span>
+        <small>${escapeHtml(status)}</small>
+      </button>
+    `;
+  }).join("");
+
+  target.querySelectorAll("[data-page-line]").forEach((button) => {
+    button.addEventListener("click", () => setActiveReviewLine(button.dataset.pageLine));
+  });
 }
 
 function renderStructuredReview() {
@@ -1063,88 +1721,18 @@ function renderStructuredReview() {
 
   structured.classList.remove("hidden");
   simple.classList.add("hidden");
-  renderSourcePreview("verifySourcePreview");
 
-  const lines = reviewLines();
-  const list = $("lineReviewList");
+  const totalPages = Number(importedTranscriptionReview.page_count || 1);
+  reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
+  const lines = pageLines();
 
-  list.innerHTML = lines.map((line, index) => {
-    const raw = line?.primary_ocr?.raw_text || "";
-    const band = line?.primary_ocr?.confidence_band || "UNKNOWN";
-    const conf = line?.primary_ocr?.block_confidence;
-    const legibility = line?.visual_review?.legibility_score;
-    const googleRaw = line?.secondary_ocr?.raw_text || "";
-    const googleWordConf = line?.secondary_ocr?.min_word_confidence;
-    const googleSymbolConf = line?.secondary_ocr?.min_symbol_confidence;
-    const modelSimilarity = line?.comparison?.sarvam_google_similarity;
-    const modelsDisagree = Boolean(line?.comparison?.models_disagree);
-    const priority = line?.review?.priority || "NORMAL";
-    const included = line?.review?.include_in_corpus !== false;
-    const alt = Boolean(line?.review?.needs_alternative_ocr);
-    const confirmed = line?.review?.status === "CONFIRMED";
-    const flags = Array.isArray(line?.review?.flags) ? line.review.flags : [];
+  if (!activeReviewLineId || !lines.some((line) => line.line_id === activeReviewLineId)) {
+    activeReviewLineId = lines.find((line) => !reviewedLine(line))?.line_id || lines[0]?.line_id || null;
+  }
 
-    return `
-      <article class="line-review-card ${confirmed ? "confirmed" : ""}" data-review-index="${index}">
-        <div class="line-review-head">
-          <div>
-            <strong>${escapeHtml(line.line_id || `Line ${index + 1}`)}</strong>
-            <span class="priority-chip priority-${escapeHtml(priority.toLowerCase())}">${escapeHtml(priority)} review</span>
-          </div>
-          <div class="review-signals">
-            <span class="confidence-chip ${reviewBandClass(band)}">Sarvam ${escapeHtml(band)}${typeof conf === "number" ? ` · ${conf.toFixed(3)}` : ""}</span>
-            ${typeof modelSimilarity === "number" ? `<span class="${modelsDisagree ? "model-disagree" : ""}">Sarvam↔Google ${(modelSimilarity * 100).toFixed(0)}%</span>` : ""}
-            ${typeof googleWordConf === "number" ? `<span>Google word min ${googleWordConf.toFixed(3)}</span>` : ""}
-            ${typeof googleSymbolConf === "number" ? `<span>Google symbol min ${googleSymbolConf.toFixed(3)}</span>` : ""}
-          </div>
-        </div>
-
-        ${flags.length ? `<div class="line-flags">${flags.map((flag) => `<span>${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
-
-        <label>Raw Sarvam transcription</label>
-        <div class="raw-transcription tamil">${escapeHtml(raw)}</div>
-
-        ${googleRaw ? `
-          <label>Google Vision independent reading</label>
-          <div class="google-transcription tamil ${modelsDisagree ? "disagree" : ""}">${escapeHtml(googleRaw)}</div>
-        ` : ""}
-
-        <label>Verified transcription</label>
-        <textarea class="line-verified tamil" data-field="verified">${escapeHtml(line?.review?.verified_text ?? raw)}</textarea>
-
-        <div class="line-review-options">
-          <label><input type="checkbox" data-field="include" ${included ? "checked" : ""}> Include in corpus</label>
-          <label><input type="checkbox" data-field="alternative" ${alt ? "checked" : ""}> Needs alternative OCR</label>
-          <label><input type="checkbox" data-field="confirmed" ${confirmed ? "checked" : ""}> Confirm reviewed</label>
-        </div>
-      </article>
-    `;
-  }).join("");
-
-  list.querySelectorAll("[data-review-index]").forEach((card) => {
-    const index = Number(card.dataset.reviewIndex);
-    const line = lines[index];
-
-    card.querySelector('[data-field="verified"]').addEventListener("input", (event) => {
-      line.review.verified_text = event.target.value;
-    });
-
-    card.querySelector('[data-field="include"]').addEventListener("change", (event) => {
-      line.review.include_in_corpus = event.target.checked;
-      updateReviewProgress();
-    });
-
-    card.querySelector('[data-field="alternative"]').addEventListener("change", (event) => {
-      line.review.needs_alternative_ocr = event.target.checked;
-    });
-
-    card.querySelector('[data-field="confirmed"]').addEventListener("change", (event) => {
-      line.review.status = event.target.checked ? "CONFIRMED" : "PENDING";
-      card.classList.toggle("confirmed", event.target.checked);
-      updateReviewProgress();
-    });
-  });
-
+  renderReviewPage();
+  renderActiveReviewCard();
+  renderPageReviewQueue();
   updateReviewProgress();
 }
 
@@ -1155,22 +1743,18 @@ function updateReviewProgress() {
   }
 
   const lines = reviewLines();
+  const reviewed = lines.filter(reviewedLine).length;
   const included = lines.filter((line) => line?.review?.include_in_corpus !== false);
   const confirmed = included.filter((line) => line?.review?.status === "CONFIRMED");
-  const ignored = lines.length - included.length;
-  const alt = lines.filter((line) => line?.review?.needs_alternative_ocr).length;
+  const ignored = lines.filter((line) => line?.review?.status === "IGNORED").length;
 
-  $("reviewProgress").textContent = `${confirmed.length}/${included.length} included confirmed`;
-  $("reviewSummary").innerHTML = `
-    <strong>${included.length}</strong> included ·
-    <strong>${confirmed.length}</strong> confirmed ·
-    <strong>${ignored}</strong> ignored ·
-    <strong>${alt}</strong> marked for alternative OCR
-  `;
+  $("reviewProgress").textContent = `${reviewed}/${lines.length} reviewed`;
+  $("reviewSummary").textContent =
+    `Page ${reviewPage}: ${pageLines().filter(reviewedLine).length}/${pageLines().length} reviewed · Document: ${confirmed.length} included · ${ignored} ignored`;
 
-  $("verificationChecked").checked = included.length > 0 && confirmed.length === included.length;
-  $("verifiedText").value = consolidatedVerifiedText();
+  $("uploadToAnnotate").disabled = !included.length || confirmed.length !== included.length || reviewed !== lines.length;
 }
+
 
 function confirmAllIncludedLines() {
   if (!importedTranscriptionReview) return;
@@ -1239,6 +1823,10 @@ async function loadSelectedFile() {
   const file = $("uploadFile").files?.[0];
   if (!file) return;
 
+  resetOcrPageProgress();
+  importedTranscriptionReview = null;
+  updateRecognitionImportStatus();
+
   if (uploadObjectUrl) {
     URL.revokeObjectURL(uploadObjectUrl);
     uploadObjectUrl = null;
@@ -1290,6 +1878,197 @@ function updateUploadPreview() {
   `;
 }
 
+
+function prettyCategory(value = "") {
+  return String(value || "OTHER")
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function renderAnnotationWorkspace() {
+  const text = consolidatedVerifiedText() || $("verifiedText").value || "";
+  $("annotationSourceText").value = text;
+  renderErrorCandidates();
+  renderDraftAnnotations();
+
+  const status = $("annotationStatus");
+  if (status) status.textContent = draftAnnotations.length
+    ? `${draftAnnotations.length} accepted`
+    : "Ready for review";
+}
+
+function selectAnnotationSourceText() {
+  const box = $("annotationSourceText");
+  const start = box.selectionStart;
+  const end = box.selectionEnd;
+  if (end > start) {
+    const selected = box.value.slice(start, end).trim();
+    if (selected) $("annotationText").value = selected;
+  }
+}
+
+function addAcceptedAnnotation(candidate, categoryOverride = "") {
+  const category = categoryOverride || candidate.category || "OTHER";
+  const duplicate = draftAnnotations.some((a) =>
+    normalizeTamilText(a.text || "") === normalizeTamilText(candidate.learner_form || "")
+    && String(a.category || "").toUpperCase() === String(category).toUpperCase()
+  );
+
+  if (!duplicate) {
+    draftAnnotations.push({
+      text: candidate.learner_form || "",
+      category,
+      suggested: candidate.suggested_correction || "",
+      note: candidate.note || "",
+      source: (candidate.engines || []).join("+") || "ai"
+    });
+  }
+  renderDraftAnnotations();
+  renderAnnotationWorkspace();
+}
+
+function renderErrorCandidates() {
+  const target = $("errorCandidateList");
+  if (!target) return;
+
+  if (!errorCandidates.length) {
+    target.innerHTML = '<div class="empty">No automatic candidates loaded. Run candidate detection, or add annotations manually.</div>';
+    return;
+  }
+
+  target.innerHTML = errorCandidates.map((c, i) => {
+    const status = c.review_status || "PENDING";
+    const engines = Array.isArray(c.engines) ? c.engines : [];
+    const cats = Array.isArray(c.category_options) && c.category_options.length
+      ? c.category_options
+      : [c.category || "OTHER"];
+
+    return `
+      <article class="error-candidate ${status !== "PENDING" ? "resolved" : ""}" data-candidate-index="${i}">
+        <div class="candidate-head">
+          <div>
+            <strong class="tamil">${escapeHtml(c.learner_form || "")}</strong>
+            ${c.agreement ? '<span class="agreement-chip">2-model agreement</span>' : ""}
+          </div>
+          <span class="small">${escapeHtml(engines.join(" + ") || "candidate")}</span>
+        </div>
+
+        <div class="candidate-meta">
+          <label>
+            Tag
+            <select data-candidate-category>
+              ${cats.concat(
+                ["SPELLING","GRAMMAR","PUNCTUATION","WORD_CHOICE","WORD_FORM","MISSING_WORD","EXTRA_WORD","OTHER"]
+                  .filter((x) => !cats.includes(x))
+              ).map((cat) => `<option value="${escapeHtml(cat)}" ${cat === c.category ? "selected" : ""}>${escapeHtml(prettyCategory(cat))}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Suggested form
+            <input data-candidate-suggested class="tamil" value="${escapeHtml(c.suggested_correction || "")}" />
+          </label>
+        </div>
+
+        ${c.note ? `<div class="small candidate-note">${escapeHtml(c.note)}</div>` : ""}
+
+        <div class="candidate-actions">
+          <button type="button" class="primary-btn" data-candidate-accept>Accept</button>
+          <button type="button" data-candidate-edit>Edit manually</button>
+          <button type="button" data-candidate-reject>Reject</button>
+          ${status !== "PENDING" ? `<span class="small">Status: ${escapeHtml(status)}</span>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  target.querySelectorAll("[data-candidate-index]").forEach((card) => {
+    const i = Number(card.dataset.candidateIndex);
+    const c = errorCandidates[i];
+    const cat = () => card.querySelector("[data-candidate-category]").value;
+    const suggested = () => card.querySelector("[data-candidate-suggested]").value.trim();
+
+    card.querySelector("[data-candidate-accept]").addEventListener("click", () => {
+      c.category = cat();
+      c.suggested_correction = suggested();
+      c.review_status = "ACCEPTED";
+      addAcceptedAnnotation(c, c.category);
+      renderErrorCandidates();
+    });
+
+    card.querySelector("[data-candidate-reject]").addEventListener("click", () => {
+      c.review_status = "REJECTED";
+      renderErrorCandidates();
+    });
+
+    card.querySelector("[data-candidate-edit]").addEventListener("click", () => {
+      $("annotationText").value = c.learner_form || "";
+      $("annotationCategory").value = cat();
+      $("annotationSuggested").value = suggested();
+      $("annotationNote").value = c.note || "";
+      c.review_status = "EDITING";
+      renderErrorCandidates();
+      $("annotationText").focus();
+    });
+  });
+}
+
+async function runErrorDetection() {
+  if (errorDetectionRunning) return;
+  const text = consolidatedVerifiedText() || $("verifiedText").value.trim();
+  if (!text) {
+    alert("No verified learner text is available.");
+    return;
+  }
+
+  const base = ocrApiUrl();
+  if (!base) {
+    alert("Backend is not configured.");
+    return;
+  }
+
+  errorDetectionRunning = true;
+  $("runErrorDetectionBtn").disabled = true;
+  $("errorDetectionStatus").textContent = "Running Sarvam + Gemini + rules…";
+  $("annotationStatus").textContent = "Detecting…";
+
+  try {
+    const response = await fetch(`${base}/api/detect-errors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        level: $("uploadLevel").value,
+        task: $("uploadTask").value
+      })
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.detail || `Error detector returned HTTP ${response.status}`);
+    }
+
+    errorCandidates = Array.isArray(payload?.candidates)
+      ? payload.candidates.map((c) => ({ ...c, review_status: "PENDING" }))
+      : [];
+
+    const engineText = Object.entries(payload?.engines || {})
+      .map(([name, info]) => `${name}: ${info.ok ? "ok" : "unavailable"}`)
+      .join(" · ");
+
+    $("errorDetectionStatus").textContent =
+      `${errorCandidates.length} candidate(s) · ${engineText}`;
+    $("annotationStatus").textContent = `${errorCandidates.length} candidates`;
+    renderErrorCandidates();
+  } catch (error) {
+    $("errorDetectionStatus").textContent = `Detection failed: ${error.message}`;
+    $("annotationStatus").textContent = "Detection error";
+  } finally {
+    errorDetectionRunning = false;
+    $("runErrorDetectionBtn").disabled = false;
+  }
+}
+
 function addDraftAnnotation() {
   const text = $("annotationText").value.trim();
   if (!text) {
@@ -1301,7 +2080,8 @@ function addDraftAnnotation() {
     text,
     category: $("annotationCategory").value,
     suggested: $("annotationSuggested").value.trim(),
-    note: $("annotationNote").value.trim()
+    note: $("annotationNote").value.trim(),
+    source: "manual"
   });
 
   $("annotationText").value = "";
@@ -1322,7 +2102,7 @@ function renderDraftAnnotations() {
     <div class="annotation-draft-item">
       <div>
         <strong class="tamil">${escapeHtml(a.text)}</strong>
-        <div class="small">${escapeHtml(a.category)}${a.suggested ? ` · Suggested: <span class="tamil">${escapeHtml(a.suggested)}</span>` : ""}${a.note ? ` · ${escapeHtml(a.note)}` : ""}</div>
+        <div class="small">${escapeHtml(prettyCategory(a.category))}${a.suggested ? ` · Suggested: <span class="tamil">${escapeHtml(a.suggested)}</span>` : ""}${a.note ? ` · ${escapeHtml(a.note)}` : ""}${a.source ? ` · Source: ${escapeHtml(a.source)}` : ""}</div>
       </div>
       <button type="button" data-remove-annotation="${i}" aria-label="Remove annotation">×</button>
     </div>
@@ -1404,6 +2184,11 @@ function resetUploadWorkflow() {
   $("uploadFile").value = "";
   $("recognitionJsonFile").value = "";
   importedTranscriptionReview = null;
+  reviewPage = 1;
+  reviewZoom = 1;
+  activeReviewLineId = null;
+  errorCandidates = [];
+  resetOcrPageProgress();
   $("machineText").value = "";
   $("verifiedText").value = "";
   $("verificationChecked").checked = false;
@@ -1507,12 +2292,12 @@ function wireNavigation() {
   });
 
   $("uploadToVerify").addEventListener("click", () => {
-    if (ocrProcessing) return;
-
-    if (!importedTranscriptionReview) {
+    if (!importedTranscriptionReview || reviewLines().length === 0) {
       const manual = $("machineText").value.trim();
       if (!manual) {
-        alert("Recognition has not completed yet.");
+        alert(ocrProcessing
+          ? "The first page is still processing. Transcription Review will be available as soon as one page is ready."
+          : "Recognition has not completed yet.");
         return;
       }
       $("verifiedText").value = manual;
@@ -1524,6 +2309,16 @@ function wireNavigation() {
 
   $("uploadToAnnotate").addEventListener("click", () => {
     if (importedTranscriptionReview) {
+      if (ocrProcessing || ocrPageStates.some((x) => x.status !== "ready")) {
+        const waiting = ocrPageStates.filter((x) => x.status === "waiting" || x.status === "processing").length;
+        const failed = ocrFailedPages();
+        alert(
+          waiting
+            ? `OCR is still processing ${waiting} page(s). Finish recognition before error annotation.`
+            : `${failed} page(s) failed recognition. Retry them before error annotation.`
+        );
+        return;
+      }
       const included = reviewLines().filter((line) => line?.review?.include_in_corpus !== false);
       const pending = included.filter((line) => line?.review?.status !== "CONFIRMED");
 
@@ -1540,6 +2335,7 @@ function wireNavigation() {
       $("verifiedText").value = consolidatedVerifiedText();
       $("verificationChecked").checked = true;
       goUploadStep(4);
+      renderAnnotationWorkspace();
       return;
     }
 
@@ -1554,7 +2350,40 @@ function wireNavigation() {
     goUploadStep(4);
   });
 
-  $("confirmIncludedLinesBtn").addEventListener("click", confirmAllIncludedLines);
+  $("reviewPrevPage").addEventListener("click", () => {
+    reviewPage = Math.max(1, reviewPage - 1);
+    activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
+    renderStructuredReview();
+  });
+
+  $("reviewNextPage").addEventListener("click", () => {
+    const total = Number(importedTranscriptionReview?.page_count || 1);
+    reviewPage = Math.min(total, reviewPage + 1);
+    activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
+    renderStructuredReview();
+  });
+
+  $("reviewZoomOut").addEventListener("click", () => {
+    reviewZoom = Math.max(0.45, reviewZoom - 0.15);
+    renderReviewPage();
+    requestAnimationFrame(scrollActiveRegionIntoView);
+  });
+
+  $("reviewZoomFit").addEventListener("click", () => {
+    reviewZoom = 1;
+    renderReviewPage();
+    requestAnimationFrame(scrollActiveRegionIntoView);
+  });
+
+  $("reviewZoomIn").addEventListener("click", () => {
+    reviewZoom = Math.min(2.5, reviewZoom + 0.15);
+    renderReviewPage();
+    requestAnimationFrame(scrollActiveRegionIntoView);
+  });
+
+  $("runErrorDetectionBtn").addEventListener("click", runErrorDetection);
+  $("annotationSourceText").addEventListener("mouseup", selectAnnotationSourceText);
+  $("annotationSourceText").addEventListener("keyup", selectAnnotationSourceText);
 
   $("addAnnotationBtn").addEventListener("click", addDraftAnnotation);
   $("uploadToReview").addEventListener("click", () => goUploadStep(5));

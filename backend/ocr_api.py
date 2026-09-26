@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import os
@@ -14,13 +15,16 @@ import httpx
 import numpy as np
 import pymupdf
 import regex as re
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 from sarvamai import SarvamAI
 from google.cloud import vision
+from google import genai
+from google.genai import types as genai_types
+import google.auth
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.9.1")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.11")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -173,6 +177,110 @@ def render_pages(file_path: str, mime_type: str):
     else:
         pages = [Image.open(file_path).convert("RGB")]
     return pages
+
+
+
+def upload_page_count(file_path: str, mime_type: str) -> int:
+    if mime_type == "application/pdf" or file_path.lower().endswith(".pdf"):
+        doc = pymupdf.open(file_path)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    return 1
+
+
+def render_single_page(file_path: str, mime_type: str, page_number: int) -> Image.Image:
+    """Render one 1-indexed page. Images are treated as a single-page document."""
+    if page_number < 1:
+        raise ValueError("page_number must be 1 or greater.")
+
+    if mime_type == "application/pdf" or file_path.lower().endswith(".pdf"):
+        doc = pymupdf.open(file_path)
+        try:
+            if page_number > len(doc):
+                raise ValueError(f"Page {page_number} is outside this {len(doc)}-page PDF.")
+            page = doc.load_page(page_number - 1)
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(3.0, 3.0), alpha=False)
+            return Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        finally:
+            doc.close()
+
+    if page_number != 1:
+        raise ValueError("Image uploads contain only page 1.")
+    return Image.open(file_path).convert("RGB")
+
+
+
+def page_preview_payload(page_img: Image.Image):
+    """
+    Return a compressed browser preview in the same coordinate system used by
+    Surya polygons, so the frontend can highlight exact OCR regions.
+    """
+    preview = page_img.copy()
+    max_width = 1400
+    if preview.width > max_width:
+        ratio = max_width / float(preview.width)
+        preview = preview.resize(
+            (max_width, max(1, int(round(preview.height * ratio)))),
+            Image.Resampling.LANCZOS,
+        )
+
+    buf = io.BytesIO()
+    preview.save(buf, format="JPEG", quality=78, optimize=True)
+    return {
+        "data_url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"),
+        "display_width": preview.width,
+        "display_height": preview.height,
+        "source_width": page_img.width,
+        "source_height": page_img.height,
+    }
+
+
+def process_one_page(
+    input_path: Path,
+    mime_type: str,
+    page_number: int,
+    work_dir: Path,
+):
+    """
+    Process one page only:
+      Sarvam page OCR + Google Vision page OCR + Surya line geometry.
+    This keeps each browser request bounded and lets the UI reveal completed
+    pages immediately.
+    """
+    page_img = render_single_page(str(input_path), mime_type, page_number)
+
+    page_png = work_dir / f"page_{page_number}.png"
+    page_img.save(page_png, format="PNG")
+
+    sarvam_doc = run_sarvam_digitise(
+        str(page_png),
+        "image/png",
+        work_dir / f"sarvam_page_{page_number}",
+    )
+    sarvam_pages = sarvam_doc.get("pages", [])
+    if not sarvam_pages:
+        raise RuntimeError(f"Sarvam returned zero pages for page {page_number}.")
+
+    google_page = run_google_vision(page_img)
+    blocks = normalize_sarvam_blocks(sarvam_pages[0], page_img)
+    surya_lines = detect_surya_lines(page_img)
+    records = map_blocks_to_lines(blocks, surya_lines, page_number)
+
+    # Existing helpers index by original page number. Supply sparse arrays so
+    # the same review logic works for an independently processed page.
+    google_pages = [{"words": [], "full_text": ""} for _ in range(page_number)]
+    google_pages[page_number - 1] = google_page
+    page_images = [None for _ in range(page_number)]
+    page_images[page_number - 1] = page_img
+
+    attach_google_to_lines(records, google_pages)
+    apply_visual_review(records, page_images)
+    return {
+        "lines": finalise_review(records),
+        "page_preview": page_preview_payload(page_img),
+    }
 
 
 def detect_surya_lines(page_img: Image.Image):
@@ -596,16 +704,19 @@ def finalise_review(records):
         if gsym is not None and gsym < GOOGLE_LOW_SYMBOL_THRESHOLD:
             flags.append("GOOGLE_LOW_SYMBOL_CONFIDENCE")
 
-        # Model disagreement is the strongest automatic review trigger.
+        # v0.11: disagreement is a review signal, but not automatically HIGH.
+        # HIGH is reserved for genuinely weak OCR/geometry evidence.
         if (
-            "OCR_MODEL_DISAGREEMENT" in flags
-            or r["confidence_band"] == "SUPER_LOW"
-            or r["visual_legibility_score"] < 55
+            r["confidence_band"] == "SUPER_LOW"
+            or (gsym is not None and gsym < 0.45)
+            or (gword is not None and gword < 0.60)
+            or r["visual_legibility_score"] < 50
             or "NO_LINE_GEOMETRY" in flags
         ):
             priority = "HIGH"
         elif (
-            r["confidence_band"] == "LOW"
+            "OCR_MODEL_DISAGREEMENT" in flags
+            or r["confidence_band"] == "LOW"
             or r["visual_legibility_score"] < 80
             or "GOOGLE_LOW_WORD_CONFIDENCE" in flags
             or "GOOGLE_LOW_SYMBOL_CONFIDENCE" in flags
@@ -664,9 +775,381 @@ def finalise_review(records):
     return lines
 
 
+
+ERROR_CATEGORIES = [
+    "SPELLING",
+    "GRAMMAR",
+    "PUNCTUATION",
+    "WORD_CHOICE",
+    "WORD_FORM",
+    "MISSING_WORD",
+    "EXTRA_WORD",
+    "OTHER",
+]
+
+ERROR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "learner_form": {"type": "string"},
+                    "category": {"type": "string", "enum": ERROR_CATEGORIES},
+                    "suggested_correction": {"type": "string"},
+                    "note": {"type": "string"},
+                },
+                "required": ["learner_form", "category", "suggested_correction", "note"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["candidates"],
+    "additionalProperties": False,
+}
+
+
+def error_detection_prompt(text: str, level: str = "", task: str = ""):
+    return f"""
+You are reviewing a HUMAN-VERIFIED transcription of a Tamil learner's writing.
+The text below is learner language. Detect only plausible learner-language errors.
+
+Important rules:
+- Do not rewrite the full passage.
+- Do not "improve" style merely because another wording sounds better.
+- Accept valid Tamil variants, names and context-dependent forms.
+- learner_form should copy the exact learner span from the supplied text whenever possible.
+- Use only these categories: {", ".join(ERROR_CATEGORIES)}.
+- For MISSING_WORD, use a short exact surrounding span as learner_form and show the proposed insertion in suggested_correction.
+- Return no candidate when uncertain.
+
+Learner level: {level or "unspecified"}
+Task type: {task or "unspecified"}
+
+Verified learner text:
+{text}
+""".strip()
+
+
+def clean_error_candidate(item, engine: str):
+    if not isinstance(item, dict):
+        return None
+    form = str(item.get("learner_form", "") or "").strip()
+    category = str(item.get("category", "OTHER") or "OTHER").strip().upper()
+    suggested = str(item.get("suggested_correction", "") or "").strip()
+    note = str(item.get("note", "") or "").strip()
+    if category not in ERROR_CATEGORIES:
+        category = "OTHER"
+    if not form:
+        return None
+    return {
+        "learner_form": form,
+        "category": category,
+        "suggested_correction": suggested,
+        "note": note,
+        "engines": [engine],
+        "agreement": False,
+    }
+
+
+def detect_rule_candidates(text: str):
+    """Very small deterministic checker: adjacent duplicate words / punctuation."""
+    out = []
+    # Exact adjacent duplicate token, allowing ordinary punctuation/space between.
+    token_pattern = re.compile(r"(?P<w>[\p{Tamil}\p{L}\p{M}]+)(?P<gap>\s+)(?P=w)(?![\p{L}\p{M}])", re.IGNORECASE)
+    for match in token_pattern.finditer(text or ""):
+        form = match.group(0).strip()
+        word = match.group("w")
+        out.append({
+            "learner_form": form,
+            "category": "EXTRA_WORD",
+            "suggested_correction": word,
+            "note": "Adjacent repeated word detected by deterministic rule.",
+            "engines": ["rules"],
+            "agreement": False,
+        })
+
+    punct_pattern = re.compile(r"([!?.,;:])\1{1,}")
+    for match in punct_pattern.finditer(text or ""):
+        out.append({
+            "learner_form": match.group(0),
+            "category": "PUNCTUATION",
+            "suggested_correction": match.group(1),
+            "note": "Repeated punctuation detected by deterministic rule.",
+            "engines": ["rules"],
+            "agreement": False,
+        })
+    return out
+
+
+def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
+    api_key = os.getenv("SARVAM_API_KEY")
+    if not api_key:
+        raise RuntimeError("SARVAM_API_KEY is not configured.")
+
+    payload = {
+        "model": "sarvam-105b",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a conservative Tamil learner-corpus error annotator. Return only defensible candidate annotations.",
+            },
+            {"role": "user", "content": error_detection_prompt(text, level, task)},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1800,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "tamil_error_candidates",
+                "strict": True,
+                "schema": ERROR_SCHEMA,
+            },
+        },
+    }
+
+    response = httpx.post(
+        "https://api.sarvam.ai/v1/chat/completions",
+        headers={
+            "api-subscription-key": api_key,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=120,
+    )
+    response.raise_for_status()
+    body = response.json()
+    content = body["choices"][0]["message"]["content"]
+    parsed = json.loads(content)
+    return [
+        c for item in parsed.get("candidates", [])
+        if (c := clean_error_candidate(item, "sarvam"))
+    ]
+
+
+def detect_errors_gemini(text: str, level: str = "", task: str = ""):
+    _, detected_project = google.auth.default()
+    project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT") or detected_project
+    if not project:
+        raise RuntimeError("Google Cloud project could not be determined for Vertex AI.")
+
+    location = os.getenv("VERTEX_LOCATION", "global")
+    model = os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash")
+
+    client = genai.Client(
+        vertexai=True,
+        project=project,
+        location=location,
+        http_options=genai_types.HttpOptions(api_version="v1"),
+    )
+    response = client.models.generate_content(
+        model=model,
+        contents=error_detection_prompt(text, level, task),
+        config={
+            "temperature": 0.1,
+            "max_output_tokens": 1800,
+            "response_mime_type": "application/json",
+            "response_json_schema": ERROR_SCHEMA,
+        },
+    )
+    parsed = json.loads(response.text or '{"candidates":[]}')
+    return [
+        c for item in parsed.get("candidates", [])
+        if (c := clean_error_candidate(item, "gemini"))
+    ]
+
+
+def normalise_candidate_span(value: str):
+    return re.sub(r"[\s\p{P}\p{S}]+", "", (value or "").normalize("NFC").casefold())
+
+
+def merge_error_candidates(*groups):
+    """
+    Merge exact/near-identical spans while preserving engine provenance.
+    Same span + same category from Sarvam and Gemini becomes agreement=True.
+    """
+    merged = []
+
+    for group in groups:
+        for cand in group:
+            span_key = normalise_candidate_span(cand["learner_form"])
+            found = None
+            for existing in merged:
+                if normalise_candidate_span(existing["learner_form"]) == span_key:
+                    found = existing
+                    break
+
+            if not found:
+                item = dict(cand)
+                item["category_options"] = [cand["category"]]
+                merged.append(item)
+                continue
+
+            for engine in cand.get("engines", []):
+                if engine not in found["engines"]:
+                    found["engines"].append(engine)
+            if cand["category"] not in found["category_options"]:
+                found["category_options"].append(cand["category"])
+
+            # Prefer a non-empty correction/note if the first engine omitted one.
+            if not found.get("suggested_correction") and cand.get("suggested_correction"):
+                found["suggested_correction"] = cand["suggested_correction"]
+            if not found.get("note") and cand.get("note"):
+                found["note"] = cand["note"]
+
+            found["agreement"] = (
+                "sarvam" in found["engines"]
+                and "gemini" in found["engines"]
+                and cand["category"] == found["category"]
+            )
+
+    for item in merged:
+        item["agreement"] = bool(
+            "sarvam" in item["engines"]
+            and "gemini" in item["engines"]
+            and len(item.get("category_options", [])) == 1
+        )
+    return merged
+
+
 @app.get("/health")
 def health():
-    return {"ok": True, "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")), "google_vision": "application_default_credentials"}
+    return {
+        "ok": True,
+        "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
+        "google_vision": "application_default_credentials",
+        "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash"),
+        "error_detection": "sarvam + gemini + rules",
+    }
+
+
+
+
+@app.post("/api/detect-errors")
+async def detect_errors(payload: dict = Body(...)):
+    text = str(payload.get("text", "") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Verified learner text is required.")
+
+    level = str(payload.get("level", "") or "")
+    task = str(payload.get("task", "") or "")
+
+    engines = {}
+    rules = detect_rule_candidates(text)
+
+    try:
+        sarvam = detect_errors_sarvam(text, level, task)
+        engines["sarvam"] = {"ok": True, "count": len(sarvam)}
+    except Exception as exc:
+        sarvam = []
+        engines["sarvam"] = {"ok": False, "error": str(exc)}
+
+    try:
+        gemini = detect_errors_gemini(text, level, task)
+        engines["gemini"] = {"ok": True, "count": len(gemini)}
+    except Exception as exc:
+        gemini = []
+        engines["gemini"] = {"ok": False, "error": str(exc)}
+
+    engines["rules"] = {"ok": True, "count": len(rules)}
+    candidates = merge_error_candidates(sarvam, gemini, rules)
+
+    return {
+        "categories": ERROR_CATEGORIES,
+        "candidate_count": len(candidates),
+        "engines": engines,
+        "candidates": candidates,
+        "note": "All results are candidate annotations and require human review.",
+    }
+
+
+@app.post("/api/page-count")
+async def page_count(file: UploadFile = File(...)):
+    name = file.filename or "upload.bin"
+    suffix = Path(name).suffix.lower()
+    supported = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+    if suffix not in supported:
+        raise HTTPException(status_code=400, detail="OCR API currently accepts PDF and image files.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    mime = file.content_type or ("application/pdf" if suffix == ".pdf" else "image/png")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="corpus_count_") as td:
+            input_path = Path(td) / name
+            input_path.write_bytes(data)
+            return {
+                "source_filename": name,
+                "page_count": upload_page_count(str(input_path), mime),
+            }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/transcribe-page")
+async def transcribe_page(
+    file: UploadFile = File(...),
+    page_number: int = Form(...),
+    document_id: str = Form("DRAFT-001"),
+    source_type: str = Form("auto"),
+):
+    name = file.filename or "upload.bin"
+    suffix = Path(name).suffix.lower()
+    supported = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+    if suffix not in supported:
+        raise HTTPException(status_code=400, detail="OCR API currently accepts PDF and image files.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    mime = file.content_type or ("application/pdf" if suffix == ".pdf" else "image/png")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"corpus_p{page_number}_") as td_raw:
+            td = Path(td_raw)
+            input_path = td / name
+            input_path.write_bytes(data)
+
+            total_pages = upload_page_count(str(input_path), mime)
+            if page_number < 1 or page_number > total_pages:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"page_number must be between 1 and {total_pages}.",
+                )
+
+            started = time.time()
+            page_result = process_one_page(input_path, mime, page_number, td)
+            lines = page_result["lines"]
+
+            return {
+                "schema_version": "1.3-page-by-page-review",
+                "document_id": document_id,
+                "source_filename": name,
+                "source_type": source_type,
+                "page_number": page_number,
+                "page_count": total_pages,
+                "elapsed_seconds": round(time.time() - started, 2),
+                "page_preview": page_result["page_preview"],
+                "pipeline": {
+                    "primary_ocr": "sarvam_vision_single_page",
+                    "secondary_ocr": "google_cloud_vision_single_page",
+                    "comparison": "sarvam_google_line_disagreement",
+                    "line_geometry": "surya",
+                    "automatic_fallback_ocr": False,
+                    "manual_review_required": True,
+                    "processing_mode": "page_by_page",
+                },
+                "lines": lines,
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/transcribe")

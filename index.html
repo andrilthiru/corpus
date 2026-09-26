@@ -159,7 +159,7 @@
         <div class="step-heading">
           <div>
             <h3>2. OCR / Handwriting recognition</h3>
-            <p class="subtext">The uploaded document is sent to the secure OCR service automatically. Sarvam produces the primary transcription; Surya supplies line geometry and review signals. No JSON upload is required.</p>
+            <p class="subtext">The document is processed one page at a time. Completed pages become available for transcription review immediately while later pages continue processing. Sarvam is the primary OCR; Google Vision provides an independent reading; Surya supplies line geometry.</p>
           </div>
           <span id="processingRoute" class="status-pill">Awaiting file</span>
         </div>
@@ -173,11 +173,19 @@
             <h4>Recognition result</h4>
             <div id="recognitionImportStatus" class="recognition-status empty">Recognition has not started.</div>
             <div id="ocrProgress" class="ocr-progress hidden">
-              <div class="ocr-spinner" aria-hidden="true"></div>
-              <div>
-                <strong>Processing document…</strong>
-                <div class="small">Sarvam OCR + Surya line geometry. This may take a little while for multi-page documents.</div>
+              <div class="ocr-progress-head">
+                <div id="ocrSpinner" class="ocr-spinner" aria-hidden="true"></div>
+                <div>
+                  <strong id="ocrProgressTitle">Preparing document…</strong>
+                  <div id="ocrProgressDetail" class="small">Determining page count.</div>
+                </div>
+                <div id="ocrProgressCount" class="ocr-progress-count">0 / 0</div>
               </div>
+              <div class="ocr-progress-track" aria-label="OCR page progress">
+                <div id="ocrProgressFill" class="ocr-progress-fill" style="width:0%"></div>
+              </div>
+              <div id="ocrPageStatusList" class="ocr-page-status-list"></div>
+              <div class="small ocr-progress-note">Completed pages can be reviewed before the whole document finishes.</div>
             </div>
             <button id="retryOcrBtn" type="button" class="hidden">Retry recognition</button>
             <details class="machine-fallback">
@@ -194,7 +202,7 @@
 
         <div class="step-actions">
           <button type="button" data-prev-step="1">← Back</button>
-          <button id="uploadToVerify" type="button" class="primary-btn">Continue to transcription review →</button>
+          <button id="uploadToVerify" type="button" class="primary-btn">Review ready pages →</button>
         </div>
       </div>
 
@@ -208,25 +216,36 @@
         </div>
 
         <div id="structuredReviewMode" class="structured-review hidden">
-          <div class="transcription-review-layout">
+          <div class="review-page-nav">
+            <button id="reviewPrevPage" type="button">← Previous page</button>
+            <strong id="reviewPageLabel">Page 1</strong>
+            <button id="reviewNextPage" type="button">Next page →</button>
+            <span class="review-nav-spacer"></span>
+            <button id="reviewZoomOut" type="button" aria-label="Zoom out">−</button>
+            <button id="reviewZoomFit" type="button">Fit</button>
+            <button id="reviewZoomIn" type="button" aria-label="Zoom in">+</button>
+          </div>
+
+          <div class="review-page-grid">
             <div class="review-source-column">
-              <h4>Original source</h4>
-              <div id="verifySourcePreview" class="source-preview sticky-preview empty">No document selected.</div>
-              <div class="review-legend">
-                <strong>Review guide</strong>
-                <span><b>SUPER LOW</b> &lt; 0.60</span>
-                <span><b>LOW</b> 0.60–0.80</span>
-                <span><b>NORMAL</b> 0.80–0.90</span>
-                <span><b>HIGH</b> ≥ 0.90</span>
-                <small>High confidence still requires human verification.</small>
+              <div id="reviewPageViewport" class="review-page-viewport">
+                <div id="reviewPageStage" class="review-page-stage">
+                  <div class="empty">A processed page preview will appear here.</div>
+                </div>
               </div>
+              <div class="small review-help">The active handwriting region is highlighted. Click another highlighted region to review it.</div>
             </div>
-            <div>
+
+            <div class="review-work-column">
               <div class="review-toolbar">
                 <div id="reviewSummary" class="small"></div>
-                <button id="confirmIncludedLinesBtn" type="button">Confirm all included lines</button>
               </div>
-              <div id="lineReviewList" class="line-review-list"></div>
+              <div id="activeReviewCard"></div>
+              <div class="page-review-heading">
+                <strong>Items on this page</strong>
+                <span id="pageReviewProgress" class="small"></span>
+              </div>
+              <div id="pageReviewQueue" class="page-review-queue"></div>
             </div>
           </div>
         </div>
@@ -253,39 +272,61 @@
       </div>
 
       <div class="panel upload-step-panel" data-upload-panel="4">
-        <h3>4. Error Detection & Annotation</h3>
-        <p class="subtext">Stage 2 operates only on the human-verified transcription. For now, add or review learner-language error annotations manually; automated candidate detection can be connected next.</p>
-
-        <div class="form-grid annotation-form">
-          <label>
-            Learner form
-            <input id="annotationText" class="tamil" type="text" placeholder="Form in learner text" />
-          </label>
-          <label>
-            Category
-            <select id="annotationCategory">
-              <option>Spelling</option>
-              <option>Grammar</option>
-              <option>Word Choice</option>
-              <option>Usage</option>
-              <option>Punctuation</option>
-              <option>Morphology</option>
-              <option>Syntax</option>
-              <option>Vocabulary</option>
-              <option>Other</option>
-            </select>
-          </label>
-          <label>
-            Suggested / standard form
-            <input id="annotationSuggested" class="tamil" type="text" placeholder="Optional" />
-          </label>
-          <label>
-            Note
-            <input id="annotationNote" type="text" placeholder="Optional annotation note" />
-          </label>
+        <div class="step-heading">
+          <div>
+            <h3>4. Error Detection & Annotation</h3>
+            <p class="subtext">Automated suggestions are candidates only. Sarvam and Gemini analyse the human-verified learner text independently; a simple deterministic rule checker adds basic duplicate-word and punctuation signals.</p>
+          </div>
+          <span id="annotationStatus" class="status-pill">Awaiting detection</span>
         </div>
 
-        <button id="addAnnotationBtn" type="button">+ Add annotation</button>
+        <div class="annotation-source-panel">
+          <h4>Verified learner text</h4>
+          <textarea id="annotationSourceText" class="tamil annotation-source-text" readonly></textarea>
+          <div class="small">Tip: select a learner word or phrase above to copy it into the manual annotation form.</div>
+        </div>
+
+        <div class="annotation-ai-toolbar">
+          <button id="runErrorDetectionBtn" type="button" class="primary-btn">Run candidate detection</button>
+          <span id="errorDetectionStatus" class="small">No automatic scan run yet.</span>
+        </div>
+
+        <div id="errorCandidateList" class="error-candidate-list"></div>
+
+        <details class="manual-annotation-panel" open>
+          <summary><strong>+ Manual annotation</strong></summary>
+          <div class="form-grid annotation-form">
+            <label>
+              Learner form
+              <input id="annotationText" class="tamil" type="text" placeholder="Select or enter learner form" />
+            </label>
+            <label>
+              Category
+              <select id="annotationCategory">
+                <option value="SPELLING">Spelling</option>
+                <option value="GRAMMAR">Grammar</option>
+                <option value="PUNCTUATION">Punctuation</option>
+                <option value="WORD_CHOICE">Word choice</option>
+                <option value="WORD_FORM">Word form</option>
+                <option value="MISSING_WORD">Missing word</option>
+                <option value="EXTRA_WORD">Extra word</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </label>
+            <label>
+              Suggested / standard form
+              <input id="annotationSuggested" class="tamil" type="text" placeholder="Optional" />
+            </label>
+            <label>
+              Note
+              <input id="annotationNote" type="text" placeholder="Optional annotation note" />
+            </label>
+          </div>
+
+          <button id="addAnnotationBtn" type="button">Add annotation</button>
+        </details>
+
+        <h4 style="margin-top:18px">Accepted annotations</h4>
         <div id="draftAnnotationList" class="annotation-draft-list"></div>
 
         <div class="step-actions">
