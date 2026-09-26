@@ -151,7 +151,7 @@
         <div id="uploadPreview" class="upload-preview empty">Select a file to preview its metadata.</div>
 
         <div class="step-actions right">
-          <button id="uploadToProcess" type="button" class="primary-btn">Continue to OCR / HTR →</button>
+          <button id="uploadToProcess" type="button" class="primary-btn">Process document →</button>
         </div>
       </div>
 
@@ -159,7 +159,7 @@
         <div class="step-heading">
           <div>
             <h3>2. OCR / Handwriting recognition</h3>
-            <p class="subtext">For the current prototype, run the Sarvam + Surya recognition notebook externally, then import its transcription review JSON here. The production platform can later call the same processing service through a secure backend.</p>
+            <p class="subtext">The uploaded document is sent to the secure OCR service automatically. Sarvam produces the primary transcription; Surya supplies line geometry and review signals. No JSON upload is required.</p>
           </div>
           <span id="processingRoute" class="status-pill">Awaiting file</span>
         </div>
@@ -171,22 +171,30 @@
           </div>
           <div>
             <h4>Recognition result</h4>
-            <label class="recognition-import">
-              Import transcription review JSON
-              <input id="recognitionJsonFile" type="file" accept=".json,application/json" />
-            </label>
-            <div id="recognitionImportStatus" class="recognition-status empty">No recognition review JSON loaded.</div>
+            <div id="recognitionImportStatus" class="recognition-status empty">Recognition has not started.</div>
+            <div id="ocrProgress" class="ocr-progress hidden">
+              <div class="ocr-spinner" aria-hidden="true"></div>
+              <div>
+                <strong>Processing document…</strong>
+                <div class="small">Sarvam OCR + Surya line geometry. This may take a little while for multi-page documents.</div>
+              </div>
+            </div>
+            <button id="retryOcrBtn" type="button" class="hidden">Retry recognition</button>
             <details class="machine-fallback">
-              <summary>Manual / fallback machine transcription</summary>
-              <textarea id="machineText" class="tamil transcription-box compact" placeholder="Paste OCR / HTR text here only if a structured recognition JSON is not available."></textarea>
+              <summary>Developer fallback</summary>
+              <label class="recognition-import">
+                Import transcription review JSON
+                <input id="recognitionJsonFile" type="file" accept=".json,application/json" />
+              </label>
+              <textarea id="machineText" class="tamil transcription-box compact" placeholder="Manual machine transcription fallback"></textarea>
             </details>
-            <div class="small">Raw OCR must remain unchanged. Corrections belong only in the verified transcription during Stage 3.</div>
+            <div class="small">Raw OCR remains unchanged. Corrections are stored only as verified transcription during Stage 3.</div>
           </div>
         </div>
 
         <div class="step-actions">
           <button type="button" data-prev-step="1">← Back</button>
-          <button id="uploadToVerify" type="button" class="primary-btn">Continue to verification →</button>
+          <button id="uploadToVerify" type="button" class="primary-btn">Continue to transcription review →</button>
         </div>
       </div>
 
@@ -457,6 +465,7 @@
     <div id="dialogAnnotations"></div>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -822,6 +822,7 @@ let uploadCurrentStep = 1;
 let uploadObjectUrl = null;
 let draftAnnotations = [];
 let importedTranscriptionReview = null;
+let ocrProcessing = false;
 
 function reviewLines() {
   return Array.isArray(importedTranscriptionReview?.lines)
@@ -911,7 +912,7 @@ function updateRecognitionImportStatus() {
   const target = $("recognitionImportStatus");
   if (!importedTranscriptionReview) {
     target.className = "recognition-status empty";
-    target.textContent = "No recognition review JSON loaded.";
+    target.textContent = "Recognition has not completed yet.";
     return;
   }
 
@@ -953,6 +954,94 @@ async function loadRecognitionReviewFile() {
     $("recognitionJsonFile").value = "";
     updateRecognitionImportStatus();
     alert(`Could not load recognition JSON: ${error.message}`);
+  }
+}
+
+
+function ocrApiUrl() {
+  return String(window.CORPUS_OCR_API_URL || "").replace(/\/$/, "");
+}
+
+function setOcrProcessing(active, message = "") {
+  ocrProcessing = active;
+  const progress = $("ocrProgress");
+  const retry = $("retryOcrBtn");
+  const next = $("uploadToVerify");
+
+  if (progress) progress.classList.toggle("hidden", !active);
+  if (retry) retry.classList.toggle("hidden", active || !message);
+  if (next) next.disabled = active || !importedTranscriptionReview;
+
+  if (message && $("recognitionImportStatus")) {
+    $("recognitionImportStatus").className = "recognition-status error";
+    $("recognitionImportStatus").textContent = message;
+  }
+}
+
+async function processRecognitionAutomatically() {
+  const file = $("uploadFile").files?.[0];
+  if (!file) {
+    alert("Select a learner document first.");
+    return false;
+  }
+
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".txt") || lower.endsWith(".json") || lower.endsWith(".docx")) {
+    // Digital-text paths keep the existing manual extraction flow.
+    return false;
+  }
+
+  const base = ocrApiUrl();
+  if (!base) {
+    importedTranscriptionReview = null;
+    setOcrProcessing(false, "OCR backend is not configured yet. Set CORPUS_OCR_API_URL in config.js.");
+    return false;
+  }
+
+  importedTranscriptionReview = null;
+  updateRecognitionImportStatus();
+  $("recognitionImportStatus").className = "recognition-status processing";
+  $("recognitionImportStatus").textContent = "Processing uploaded document automatically…";
+  setOcrProcessing(true);
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("document_id", $("uploadDocId").value.trim() || "DRAFT-001");
+  form.append("source_type", $("uploadSourceType").value || "auto");
+
+  try {
+    const response = await fetch(`${base}/api/transcribe`, {
+      method: "POST",
+      body: form
+    });
+
+    let payload = null;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      payload = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(text || `OCR service returned HTTP ${response.status}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.detail || payload?.error || `OCR service returned HTTP ${response.status}`);
+    }
+
+    importedTranscriptionReview = normaliseImportedReview(payload);
+    $("machineText").value = reviewLines()
+      .map((line) => line?.primary_ocr?.raw_text || "")
+      .filter(Boolean)
+      .join("\n");
+
+    updateRecognitionImportStatus();
+    renderStructuredReview();
+    setOcrProcessing(false);
+    return true;
+  } catch (error) {
+    importedTranscriptionReview = null;
+    setOcrProcessing(false, `Automatic OCR failed: ${error.message}`);
+    return false;
   }
 }
 
@@ -1314,6 +1403,7 @@ function resetUploadWorkflow() {
   renderSourcePreview("verifySourcePreview");
   renderSourcePreview("simpleVerifySourcePreview");
   updateRecognitionImportStatus();
+  setOcrProcessing(false);
   renderStructuredReview();
   goUploadStep(1);
 }
@@ -1385,20 +1475,37 @@ function wireNavigation() {
 
   $("uploadFile").addEventListener("change", loadSelectedFile);
   $("recognitionJsonFile").addEventListener("change", loadRecognitionReviewFile);
+  $("retryOcrBtn").addEventListener("click", processRecognitionAutomatically);
 
   $("uploadToProcess").addEventListener("click", async () => {
     if (!$("uploadFile").files?.[0]) {
       alert("Select a learner document first.");
       return;
     }
+
     await loadSelectedFile();
     goUploadStep(2);
+
+    const file = $("uploadFile").files?.[0];
+    const lower = file?.name?.toLowerCase() || "";
+
+    if (!lower.endsWith(".txt") && !lower.endsWith(".json") && !lower.endsWith(".docx")) {
+      await processRecognitionAutomatically();
+    }
   });
 
   $("uploadToVerify").addEventListener("click", () => {
+    if (ocrProcessing) return;
+
     if (!importedTranscriptionReview) {
-      $("verifiedText").value = $("machineText").value;
+      const manual = $("machineText").value.trim();
+      if (!manual) {
+        alert("Recognition has not completed yet.");
+        return;
+      }
+      $("verifiedText").value = manual;
     }
+
     renderStructuredReview();
     goUploadStep(3);
   });

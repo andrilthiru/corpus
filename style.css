@@ -773,3 +773,29 @@ dialog::backdrop { background: rgba(17,24,39,.45); }
   .transcription-review-layout { grid-template-columns: 1fr; }
   .sticky-preview, .review-toolbar { position: static; }
 }
+
+/* v0.8 automatic OCR service */
+.ocr-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.ocr-progress.hidden { display: none; }
+.ocr-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ddd;
+  border-top-color: #555;
+  border-radius: 50%;
+  animation: ocr-spin .8s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes ocr-spin { to { transform: rotate(360deg); } }
+.recognition-status.processing { background: #eef5ff; border-color: #bdd2f3; }
+.recognition-status.error { background: #fff1f0; border-color: #efb5b1; color: #8b2722; }
+button:disabled { opacity: .55; cursor: not-allowed; }

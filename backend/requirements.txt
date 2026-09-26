@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.12
+sarvamai
+surya-ocr==0.20.0
+pillow==10.4.0
+PyMuPDF>=1.24
+opencv-python-headless
+numpy
+regex
+httpx
