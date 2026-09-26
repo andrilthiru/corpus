@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
 
@@ -17,8 +18,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 from sarvamai import SarvamAI
+from google.cloud import vision
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.8")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.9.1")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -31,6 +33,7 @@ app.add_middleware(
 )
 
 _surya_detector = None
+_google_vision_client = None
 
 
 def get_surya_detector():
@@ -39,6 +42,18 @@ def get_surya_detector():
         from surya.detection import DetectionPredictor
         _surya_detector = DetectionPredictor()
     return _surya_detector
+
+
+
+def get_google_vision_client():
+    """
+    On Cloud Run this uses Application Default Credentials from the service.
+    For local testing you may instead set GOOGLE_APPLICATION_CREDENTIALS.
+    """
+    global _google_vision_client
+    if _google_vision_client is None:
+        _google_vision_client = vision.ImageAnnotatorClient()
+    return _google_vision_client
 
 
 def confidence_band(v: Optional[float]) -> str:
@@ -397,25 +412,194 @@ def apply_visual_review(records, page_images):
             r["ink_ratio_robust_z"] = None
 
 
+
+def google_bbox(vertices):
+    xs = [v.x for v in vertices]
+    ys = [v.y for v in vertices]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def run_google_vision(page_img: Image.Image):
+    """
+    Runs Google Cloud Vision DOCUMENT_TEXT_DETECTION once for a rendered page.
+    Returns word/symbol text, confidence, and geometry.
+    """
+    buf = io.BytesIO()
+    page_img.save(buf, format="PNG")
+
+    image = vision.Image(content=buf.getvalue())
+    response = get_google_vision_client().document_text_detection(
+        image=image,
+        image_context={"language_hints": ["ta"]},
+    )
+
+    if response.error.message:
+        raise RuntimeError(f"Google Vision failed: {response.error.message}")
+
+    annotation = response.full_text_annotation
+    words = []
+
+    for page in annotation.pages:
+        for block in page.blocks:
+            for para in block.paragraphs:
+                for word in para.words:
+                    text = "".join(sym.text for sym in word.symbols)
+                    if not text:
+                        continue
+
+                    symbols = []
+                    for sym in word.symbols:
+                        symbols.append({
+                            "text": sym.text,
+                            "confidence": float(sym.confidence),
+                            "bbox": google_bbox(sym.bounding_box.vertices),
+                        })
+
+                    words.append({
+                        "text": text,
+                        "confidence": float(word.confidence),
+                        "bbox": google_bbox(word.bounding_box.vertices),
+                        "symbols": symbols,
+                    })
+
+    return {
+        "full_text": annotation.text or "",
+        "words": words,
+    }
+
+
+def polygon_bbox(polygon):
+    if not polygon:
+        return None
+    xs = [float(p[0]) for p in polygon]
+    ys = [float(p[1]) for p in polygon]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def text_compare_form(text):
+    # Comparison only; raw OCR is never changed.
+    return re.sub(r"[\s\p{P}\p{S}]+", "", text or "").casefold()
+
+
+def text_similarity(a, b):
+    a = text_compare_form(a)
+    b = text_compare_form(b)
+    if not a or not b:
+        return None
+    return float(SequenceMatcher(None, a, b).ratio())
+
+
+def texts_disagree(a, b):
+    """
+    Ignore spacing/punctuation only. Any remaining character difference is an
+    OCR-model disagreement. This catches subtle cases such as மணலியில் vs மனைலியில்.
+    """
+    a = text_compare_form(a)
+    b = text_compare_form(b)
+    if not a or not b:
+        return False
+    return a != b
+
+
+def attach_google_to_lines(records, google_pages):
+    """
+    Maps Google word boxes to the same Surya line polygons already associated
+    with Sarvam text, then derives independent OCR disagreement/confidence signals.
+    """
+    for r in records:
+        page_num = r["page_number"]
+        polygon = r.get("polygon")
+        pb = polygon_bbox(polygon)
+
+        if not pb or page_num > len(google_pages):
+            r["google_text"] = ""
+            r["google_words"] = []
+            r["google_similarity"] = None
+            r["google_models_disagree"] = False
+            r["google_min_word_confidence"] = None
+            r["google_min_symbol_confidence"] = None
+            continue
+
+        x1, y1, x2, y2 = pb
+        ypad = max(8.0, (y2 - y1) * 0.25)
+        xpad = 20.0
+
+        matched = []
+        for w in google_pages[page_num - 1]["words"]:
+            wx1, wy1, wx2, wy2 = w["bbox"]
+            cx = (wx1 + wx2) / 2.0
+            cy = (wy1 + wy2) / 2.0
+            if (
+                (x1 - xpad) <= cx <= (x2 + xpad)
+                and (y1 - ypad) <= cy <= (y2 + ypad)
+            ):
+                matched.append(w)
+
+        matched.sort(key=lambda w: w["bbox"][0])
+        gtext = " ".join(w["text"] for w in matched).strip()
+
+        word_confs = [w["confidence"] for w in matched if isinstance(w.get("confidence"), (int, float))]
+        symbol_confs = [
+            s["confidence"]
+            for w in matched
+            for s in w.get("symbols", [])
+            if isinstance(s.get("confidence"), (int, float))
+        ]
+
+        r["google_text"] = gtext
+        r["google_words"] = matched
+        r["google_similarity"] = text_similarity(r["primary_text"], gtext)
+        r["google_models_disagree"] = texts_disagree(r["primary_text"], gtext)
+        r["google_min_word_confidence"] = min(word_confs) if word_confs else None
+        r["google_min_symbol_confidence"] = min(symbol_confs) if symbol_confs else None
+
+
+
 def finalise_review(records):
+    GOOGLE_DISAGREE_THRESHOLD = "exact_after_spacing_punctuation_normalisation"
+    GOOGLE_LOW_WORD_THRESHOLD = 0.80
+    GOOGLE_LOW_SYMBOL_THRESHOLD = 0.60
+
     lines = []
     for r in records:
         flags = []
+
         if r["confidence_band"] == "SUPER_LOW":
             flags.append("SARVAM_SUPER_LOW_CONFIDENCE")
         elif r["confidence_band"] == "LOW":
             flags.append("SARVAM_LOW_CONFIDENCE")
+
         flags.extend(r.get("visual_flags", []))
+
         if r.get("alignment_count_mismatch"):
             flags.append("SARVAM_SURYA_LINE_COUNT_MISMATCH")
+
         ad = r.get("alignment_distance")
         if ad is not None and ad > 0.75:
             flags.append("SARVAM_SURYA_ALIGNMENT_UNCERTAIN")
+
         if not r.get("polygon"):
             flags.append("NO_LINE_GEOMETRY")
 
+        gtext = r.get("google_text") or ""
+        gsim = r.get("google_similarity")
+        gword = r.get("google_min_word_confidence")
+        gsym = r.get("google_min_symbol_confidence")
+
+        models_disagree = bool(r.get("google_models_disagree"))
+        if gtext and models_disagree:
+            flags.append("OCR_MODEL_DISAGREEMENT")
+
+        if gword is not None and gword < GOOGLE_LOW_WORD_THRESHOLD:
+            flags.append("GOOGLE_LOW_WORD_CONFIDENCE")
+
+        if gsym is not None and gsym < GOOGLE_LOW_SYMBOL_THRESHOLD:
+            flags.append("GOOGLE_LOW_SYMBOL_CONFIDENCE")
+
+        # Model disagreement is the strongest automatic review trigger.
         if (
-            r["confidence_band"] == "SUPER_LOW"
+            "OCR_MODEL_DISAGREEMENT" in flags
+            or r["confidence_band"] == "SUPER_LOW"
             or r["visual_legibility_score"] < 55
             or "NO_LINE_GEOMETRY" in flags
         ):
@@ -423,6 +607,8 @@ def finalise_review(records):
         elif (
             r["confidence_band"] == "LOW"
             or r["visual_legibility_score"] < 80
+            or "GOOGLE_LOW_WORD_CONFIDENCE" in flags
+            or "GOOGLE_LOW_SYMBOL_CONFIDENCE" in flags
             or any("ALIGNMENT" in f or "COUNT_MISMATCH" in f for f in flags)
         ):
             priority = "MEDIUM"
@@ -445,6 +631,19 @@ def finalise_review(records):
                 "confidence_band": r["confidence_band"],
                 "sarvam_block_index": r["sarvam_block_index"],
             },
+            "secondary_ocr": {
+                "engine": "google_cloud_vision",
+                "source": "full_page",
+                "raw_text": gtext,
+                "min_word_confidence": gword,
+                "min_symbol_confidence": gsym,
+                "words": r.get("google_words", []),
+            },
+            "comparison": {
+                "sarvam_google_similarity": gsim,
+                "disagreement_rule": GOOGLE_DISAGREE_THRESHOLD,
+                "models_disagree": models_disagree,
+            },
             "visual_review": {
                 "legibility_score": r["visual_legibility_score"],
                 "metrics": r.get("visual_metrics"),
@@ -461,12 +660,13 @@ def finalise_review(records):
                 "status": "PENDING",
             },
         })
+
     return lines
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "sarvam_configured": bool(os.getenv("SARVAM_API_KEY"))}
+    return {"ok": True, "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")), "google_vision": "application_default_credentials"}
 
 
 @app.post("/api/transcribe")
@@ -502,24 +702,33 @@ async def transcribe(
 
             page_count = min(len(page_images), len(sarvam_pages))
             records = []
+            google_pages = []
 
             for i in range(page_count):
                 img = page_images[i]
+
+                # Independent full-page OCR from Google Vision.
+                google_pages.append(run_google_vision(img))
+
+                # Sarvam remains the primary transcription.
                 blocks = normalize_sarvam_blocks(sarvam_pages[i], img)
                 surya_lines = detect_surya_lines(img)
                 records.extend(map_blocks_to_lines(blocks, surya_lines, i + 1))
 
+            attach_google_to_lines(records, google_pages)
             apply_visual_review(records, page_images)
             lines = finalise_review(records)
 
             return {
-                "schema_version": "1.1-auto-transcription-review",
+                "schema_version": "1.2.1-sarvam-google-line-review",
                 "document_id": document_id,
                 "source_filename": name,
                 "source_type": source_type,
                 "page_count": page_count,
                 "pipeline": {
                     "primary_ocr": "sarvam_vision_full_document",
+                    "secondary_ocr": "google_cloud_vision_full_page",
+                    "comparison": "sarvam_google_line_disagreement",
                     "line_geometry": "surya",
                     "automatic_fallback_ocr": False,
                     "visual_legibility": "local_page_relative_heuristic",

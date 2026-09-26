@@ -1073,6 +1073,11 @@ function renderStructuredReview() {
     const band = line?.primary_ocr?.confidence_band || "UNKNOWN";
     const conf = line?.primary_ocr?.block_confidence;
     const legibility = line?.visual_review?.legibility_score;
+    const googleRaw = line?.secondary_ocr?.raw_text || "";
+    const googleWordConf = line?.secondary_ocr?.min_word_confidence;
+    const googleSymbolConf = line?.secondary_ocr?.min_symbol_confidence;
+    const modelSimilarity = line?.comparison?.sarvam_google_similarity;
+    const modelsDisagree = Boolean(line?.comparison?.models_disagree);
     const priority = line?.review?.priority || "NORMAL";
     const included = line?.review?.include_in_corpus !== false;
     const alt = Boolean(line?.review?.needs_alternative_ocr);
@@ -1087,8 +1092,10 @@ function renderStructuredReview() {
             <span class="priority-chip priority-${escapeHtml(priority.toLowerCase())}">${escapeHtml(priority)} review</span>
           </div>
           <div class="review-signals">
-            <span class="confidence-chip ${reviewBandClass(band)}">${escapeHtml(band)}${typeof conf === "number" ? ` · ${conf.toFixed(3)}` : ""}</span>
-            ${typeof legibility === "number" ? `<span>Legibility ${Math.round(legibility)}/100</span>` : ""}
+            <span class="confidence-chip ${reviewBandClass(band)}">Sarvam ${escapeHtml(band)}${typeof conf === "number" ? ` · ${conf.toFixed(3)}` : ""}</span>
+            ${typeof modelSimilarity === "number" ? `<span class="${modelsDisagree ? "model-disagree" : ""}">Sarvam↔Google ${(modelSimilarity * 100).toFixed(0)}%</span>` : ""}
+            ${typeof googleWordConf === "number" ? `<span>Google word min ${googleWordConf.toFixed(3)}</span>` : ""}
+            ${typeof googleSymbolConf === "number" ? `<span>Google symbol min ${googleSymbolConf.toFixed(3)}</span>` : ""}
           </div>
         </div>
 
@@ -1096,6 +1103,11 @@ function renderStructuredReview() {
 
         <label>Raw Sarvam transcription</label>
         <div class="raw-transcription tamil">${escapeHtml(raw)}</div>
+
+        ${googleRaw ? `
+          <label>Google Vision independent reading</label>
+          <div class="google-transcription tamil ${modelsDisagree ? "disagree" : ""}">${escapeHtml(googleRaw)}</div>
+        ` : ""}
 
         <label>Verified transcription</label>
         <textarea class="line-verified tamil" data-field="verified">${escapeHtml(line?.review?.verified_text ?? raw)}</textarea>

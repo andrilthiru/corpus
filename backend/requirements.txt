@@ -9,3 +9,5 @@ opencv-python-headless
 numpy
 regex
 httpx
+
+google-cloud-vision>=3.10
