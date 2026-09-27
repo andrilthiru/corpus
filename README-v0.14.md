@@ -44,5 +44,5 @@
 - To pick up where you left off, open *Upload* on the same computer and browser and choose *Resume where I left off*.
 
 ## Font
-- Tamil text uses InaiMathi when it is installed (it comes with macOS).
-- To make every viewer see the same font, place a licensed web font at `fonts/CorpusTamil.woff2`.
+- Tamil text uses Anjal InaiMathi when it is installed (InaiMathi comes with macOS).
+- Other computers fall back to Noto Sans Tamil, loaded from Google Fonts, then to Nirmala UI or Latha.

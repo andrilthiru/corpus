@@ -1,16 +1,16 @@
 * { box-sizing: border-box; }
 
-/* Tamil text face. Uses InaiMathi when it is installed (it ships with macOS; the Anjal build on Windows).
-   To make it work for every viewer, put a licensed web font in fonts/ with this exact name —
-   the browser then downloads it; if the file is missing it silently falls back to the next font. */
+/* Tamil text face: Anjal InaiMathi when the computer has it (InaiMathi ships with macOS).
+   Everyone else gets Noto Sans Tamil, loaded from Google Fonts in index.html, so every PC
+   shows a clean Tamil font; Nirmala UI / Latha (built into Windows) only if even that fails. */
 @font-face {
   font-family: "CorpusTamil";
   src:
     local("Anjal InaiMathi"),
     local("Anjal Inaimathi"),
+    local("AnjalInaiMathi"),
     local("InaiMathi"),
-    local("InaiMathi-Regular"),
-    url("fonts/CorpusTamil.woff2") format("woff2");
+    local("InaiMathi-Regular");
   font-display: swap;
 }
 
@@ -42,7 +42,7 @@ body {
 #analyzeSearch,
 #dialogTitle {
   font-family: "CorpusTamil", "Anjal InaiMathi", "Anjal Inaimathi", "InaiMathi",
-    "Noto Sans Tamil", "Latha", sans-serif;
+    "Noto Sans Tamil", "Nirmala UI", "Latha", sans-serif;
 }
 
 .topbar {
