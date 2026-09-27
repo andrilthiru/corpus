@@ -81,93 +81,150 @@
         <button class="pipe-step" type="button" data-upload-step="2">2. OCR / HTR</button>
         <button class="pipe-step" type="button" data-upload-step="3">3. Transcription Review</button>
         <button class="pipe-step" type="button" data-upload-step="4">4. Error Annotation</button>
-        <button class="pipe-step" type="button" data-upload-step="5">5. Record Review</button>
+        <button class="pipe-step" type="button" data-upload-step="5">5. Save Record</button>
       </div>
 
       <div class="panel upload-step-panel active" data-upload-panel="1">
-        <h3>1. Document and metadata</h3>
+        <div class="step-heading">
+          <div>
+            <h3>1. Script and details</h3>
+            <p class="subtext">Only the fields marked <span class="req">*</span> are needed to start. Everything else can be added later, even after saving.</p>
+          </div>
+        </div>
 
         <div id="draftResumePanel" class="draft-resume-panel hidden">
           <div>
-            <strong>Unfinished review found on this browser</strong>
+            <strong>You have an unfinished script on this browser</strong>
             <div id="draftResumeSummary" class="small"></div>
           </div>
           <div class="draft-resume-actions">
-            <button id="resumeDraftBtn" type="button" class="primary-btn">Resume review</button>
-            <button id="discardDraftBtn" type="button">Discard saved draft</button>
+            <button id="resumeDraftBtn" type="button" class="primary-btn">Resume where I left off</button>
+            <button id="discardDraftBtn" type="button">Discard it</button>
           </div>
         </div>
 
-        <div class="form-grid">
-          <label>
-            Document ID
-            <input id="uploadDocId" type="text" placeholder="e.g. SEC2-001" />
-          </label>
+        <div class="u1-grid">
+          <div class="u1-form">
+            <section class="u1-section">
+              <h4>Learner script <span class="req">*</span></h4>
+              <label class="u1-drop" id="uploadDrop" data-field="file">
+                <input id="uploadFile" type="file" accept=".txt,.json,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx" />
+                <span class="u1-drop-icon" aria-hidden="true">⇪</span>
+                <span class="u1-drop-main">Drop the scanned script here, or <u>choose a file</u></span>
+                <span class="u1-drop-sub small">One learner's script per upload. PDF (all pages), JPG/PNG/TIFF, DOCX or TXT</span>
+              </label>
+              <div class="field-error" data-error-for="file"></div>
+            </section>
 
-          <label>
-            Learner level
-            <select id="uploadLevel">
-              <option value="P4">Primary 4</option>
-              <option value="P6">Primary 6</option>
-              <option value="SEC2">Secondary 2</option>
-              <option value="SEC4">Secondary 4</option>
-              <option value="JC1">JC1</option>
-              <option value="JC2">JC2</option>
-            </select>
-          </label>
+            <section class="u1-section">
+              <h4>About the script</h4>
+              <div class="form-grid u1-three">
+                <label data-field="level">
+                  <span>Learner level <span class="req">*</span></span>
+                  <select id="uploadLevel">
+                    <option value="">Choose…</option>
+                    <option value="P4">Primary 4</option>
+                    <option value="P6">Primary 6</option>
+                    <option value="SEC2">Secondary 2</option>
+                    <option value="SEC4">Secondary 4</option>
+                    <option value="JC1">JC1</option>
+                    <option value="JC2">JC2</option>
+                  </select>
+                  <span class="field-error" data-error-for="level"></span>
+                </label>
+                <label data-field="year">
+                  <span>Year written <span class="req">*</span></span>
+                  <input id="uploadYear" type="number" min="2000" max="2100" value="2026" />
+                  <span class="field-error" data-error-for="year"></span>
+                </label>
+                <label data-field="task">
+                  <span>Task type <span class="req">*</span></span>
+                  <select id="uploadTask">
+                    <option value="">Choose…</option>
+                    <option>Composition</option>
+                    <option>Situational Writing</option>
+                    <option>Narrative</option>
+                    <option>Argumentative Writing</option>
+                    <option>Reflective Writing</option>
+                    <option>Expository Writing</option>
+                  </select>
+                  <span class="field-error" data-error-for="task"></span>
+                </label>
+              </div>
+              <label class="u1-id" data-field="id">
+                <span>Record ID <span class="small muted">(created for you, and used as the file name when stored)</span></span>
+                <span class="u1-id-row">
+                  <input id="uploadDocId" type="text" spellcheck="false" autocomplete="off" placeholder="Filled in once level, year and task are chosen" />
+                  <button id="uploadNewIdBtn" type="button" class="text-button">Suggest ID</button>
+                </span>
+                <span class="field-error" data-error-for="id"></span>
+              </label>
+            </section>
 
-          <label>
-            Year
-            <input id="uploadYear" type="number" min="2000" max="2100" value="2026" />
-          </label>
+            <details class="u1-section u1-optional" id="uploadOptional">
+              <summary><strong>Optional details</strong> <span class="small muted">— useful for analysis, can be added later</span></summary>
+              <div class="form-grid">
+                <label>
+                  <span>School code <span class="info-inline" title="A short code your team assigns, e.g. SCH-A. Never the school's name.">?</span></span>
+                  <input id="uploadSchoolCode" type="text" spellcheck="false" placeholder="e.g. SCH-A" />
+                </label>
+                <label>
+                  <span>Learner code <span class="info-inline" title="A pseudonymous code (e.g. L017) that lets you link several scripts by the same learner over time. The key linking codes to real names must be kept outside this app.">?</span></span>
+                  <input id="uploadLearnerCode" type="text" spellcheck="false" placeholder="e.g. L017 (never the name)" />
+                </label>
+                <label>
+                  <span>Topic</span>
+                  <input id="uploadTopic" type="text" placeholder="e.g. School, Family, Environment" />
+                </label>
+                <label>
+                  <span>Learner's own title</span>
+                  <input id="uploadTitle" class="tamil" type="text" placeholder="The title the learner wrote, if any" />
+                </label>
+                <label class="full">
+                  <span>Task prompt / question given to the learners
+                    <span class="info-inline" title="The exact question or instruction the learners answered. Scripts written to the same prompt can be compared fairly, because the topic vocabulary is the same.">?</span></span>
+                  <input id="uploadPrompt" class="tamil" type="text" placeholder="e.g. ‘உனக்கு மறக்க முடியாத ஒரு நாள்’ பற்றி ஒரு கட்டுரை எழுதுக." />
+                </label>
+                <label>
+                  <span>Source type</span>
+                  <select id="uploadSourceType">
+                    <option value="auto">Detect automatically</option>
+                    <option value="handwritten">Handwritten</option>
+                    <option value="printed">Printed / typed scan</option>
+                    <option value="digital">Digital text</option>
+                  </select>
+                </label>
+              </div>
+            </details>
 
-          <label>
-            Task type
-            <select id="uploadTask">
-              <option>Composition</option>
-              <option>Situational Writing</option>
-              <option>Narrative</option>
-              <option>Argumentative Writing</option>
-              <option>Reflective Writing</option>
-              <option>Expository Writing</option>
-            </select>
-          </label>
+            <label class="check-row u1-consent" data-field="consent">
+              <input id="uploadConsent" type="checkbox" />
+              <span>I confirm this script may be used for the corpus, and that <strong>no learner name or other identifying detail</strong> will go into the record. <span class="req">*</span>
+                <span class="small muted">If a name is written on the page, exclude that line in Transcription Review.</span></span>
+            </label>
+            <div class="field-error" data-error-for="consent"></div>
 
-          <label>
-            Topic / subject
-            <input id="uploadTopic" type="text" placeholder="e.g. School, Family, Environment" />
-          </label>
+            <div id="uploadPreview" class="upload-preview empty">No file selected yet.</div>
 
-          <label>
-            Title
-            <input id="uploadTitle" type="text" placeholder="Title of learner text" />
-          </label>
+            <div class="step-actions right">
+              <button id="uploadToProcess" type="button" class="primary-btn">Process script →</button>
+            </div>
+          </div>
 
-          <label class="full">
-            Prompt / question
-            <input id="uploadPrompt" type="text" placeholder="Actual learner writing prompt" />
-          </label>
-
-          <label>
-            Source type
-            <select id="uploadSourceType">
-              <option value="auto">Auto detect</option>
-              <option value="handwritten">Handwritten</option>
-              <option value="printed">Printed / typed scan</option>
-              <option value="digital">Digital text</option>
-            </select>
-          </label>
-
-          <label>
-            Select document
-            <input id="uploadFile" type="file" accept=".txt,.json,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx" />
-          </label>
-        </div>
-
-        <div id="uploadPreview" class="upload-preview empty">Select a file to preview its metadata.</div>
-
-        <div class="step-actions right">
-          <button id="uploadToProcess" type="button" class="primary-btn">Process document →</button>
+          <aside class="u1-guide">
+            <h4>Before you upload</h4>
+            <ol>
+              <li><strong>No names, anywhere.</strong> Not in the ID, file name, title or codes. The record is identified only by its record ID.</li>
+              <li><strong>One learner per upload.</strong> Put all pages of one script into a single PDF, in order.</li>
+              <li><strong>Clear scans.</strong> Flat page, whole page in view, about 300 dpi, no shadows. Crossed-out words are detected and left out automatically.</li>
+              <li><strong>IDs are never reused.</strong> Each record gets a readable ID (<code>LEVEL-YEAR-TASK-NNN</code>) plus a hidden unique key. You'll be warned if the ID or the same file was saved before.</li>
+              <li><strong>You can stop at any time.</strong> Work saves automatically in this browser. Come back to this page later, on the same computer and browser, and choose <em>Resume where I left off</em>.</li>
+            </ol>
+            <div class="u1-guide-foot small">
+              <strong>Required:</strong> script file, level, year, task type and the confirmation.<br>
+              <strong>Stored as:</strong> <code id="uploadStoragePath">corpus/2026/P6/P6-2026-COMP-001/</code>
+            </div>
+          </aside>
         </div>
       </div>
 
@@ -262,6 +319,7 @@
                 <div class="seg">
                   <button type="button" data-transcript-view="page" class="active">Current page</button>
                   <button type="button" data-transcript-view="document">Full document</button>
+                  <button type="button" data-transcript-view="edit" title="Edit saved text, or type the whole page">✎ Edit</button>
                 </div>
                 <button id="s3CopyBtn" type="button" class="text-button">Copy</button>
               </header>
@@ -319,6 +377,14 @@
           <button id="runErrorDetectionBtn" type="button" class="primary-btn">Run candidate detection</button>
           <span id="errorDetectionStatus" class="small">No automatic scan run yet.</span>
         </div>
+        <div id="s4StaleBanner" class="s4-stale hidden"></div>
+        <div class="s4-legend small" aria-label="Colour key">
+          <span class="lg-title">Colour key</span>
+          <span class="lg g-ezhuthu">எழுத்தியல்</span><span class="lg g-sol">சொல்லியல்</span>
+          <span class="lg g-ilakkanam">இலக்கணம்</span><span class="lg g-nadai">வாக்கிய/எழுத்து நடை</span>
+          <span class="lg-sep"></span>
+          <span class="lg s-pending">dashed = pending</span><span class="lg s-accepted">solid = accepted</span>
+        </div>
 
         <div class="s4-grid">
           <section class="s4-textcol">
@@ -337,12 +403,6 @@
               <span class="tamil s4-sel-text"></span>
               <button id="s4AddError" type="button" class="primary-btn">+ Add error</button>
             </div>
-            <div class="s4-legend small">
-              <span class="lg g-ezhuthu">எழுத்தியல்</span><span class="lg g-sol">சொல்லியல்</span>
-              <span class="lg g-ilakkanam">இலக்கணம்</span><span class="lg g-nadai">வாக்கிய/எழுத்து நடை</span>
-              <span class="lg-sep"></span>
-              <span class="lg s-pending">pending</span><span class="lg s-accepted">accepted</span>
-            </div>
           </section>
 
           <aside class="s4-cardcol">
@@ -358,21 +418,44 @@
 
         <div class="step-actions">
           <button type="button" data-prev-step="3">← Back</button>
-          <button id="uploadToReview" type="button" class="primary-btn">Review corpus record →</button>
+          <button id="uploadToReview" type="button" class="primary-btn">Check &amp; save record →</button>
         </div>
       </div>
 
       <div class="panel upload-step-panel" data-upload-panel="5">
-        <h3>5. Review corpus record</h3>
-        <p class="subtext">This prototype does not write to the live corpus database yet. Export the record as JSON for review or GitHub-based collaboration.</p>
+        <div id="recordSaveView">
+          <div class="step-heading">
+            <div>
+              <h3>5. Check and save the record</h3>
+              <p class="subtext">A last look before saving. You can still go back and change anything, and saving again later updates the same record.</p>
+            </div>
+          </div>
+          <div id="recordReview"></div>
+          <div class="step-actions">
+            <button type="button" data-prev-step="4">← Back to annotation</button>
+            <button id="saveRecordBtn" type="button" class="primary-btn">Save record ✓</button>
+          </div>
+        </div>
 
-        <div id="recordReview"></div>
-
-        <div class="step-actions wrap-actions">
-          <button type="button" data-prev-step="4">← Back</button>
-          <button id="copyRecordBtn" type="button">Copy JSON</button>
-          <button id="downloadRecordBtn" type="button" class="primary-btn">Download record JSON</button>
-          <button id="resetUploadBtn" type="button">Start another document</button>
+        <div id="recordSavedView" class="hidden">
+          <div class="saved-card">
+            <div class="saved-tick" aria-hidden="true">✓</div>
+            <h3>Record saved</h3>
+            <div id="savedRecordId" class="saved-id"></div>
+            <div id="savedRecordSummary" class="saved-stats"></div>
+            <p id="savedRecordWhere" class="small saved-where"></p>
+            <div class="saved-actions">
+              <button id="resetUploadBtn" type="button" class="primary-btn">Start the next script →</button>
+              <button id="downloadRecordBtn" type="button">Download record (JSON)</button>
+              <button id="copyRecordBtn" type="button">Copy JSON</button>
+              <button type="button" data-prev-step="4" class="text-button">Go back and edit this record</button>
+            </div>
+            <details class="saved-list">
+              <summary>Records saved on this computer <span id="savedRecordCount" class="small muted"></span></summary>
+              <div id="savedRecordList"></div>
+              <button id="downloadAllRecordsBtn" type="button" class="text-button">Download all as one JSON file</button>
+            </details>
+          </div>
         </div>
       </div>
     </section>

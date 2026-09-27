@@ -948,7 +948,8 @@ let errorDetectionRunning = false;
 
 // v0.11.2 local draft persistence
 const DRAFT_DB_NAME = "themozhi-corpus-review";
-const DRAFT_DB_VERSION = 1;
+const DRAFT_DB_VERSION = 2;
+const RECORD_STORE = "records";   // saved corpus records on this browser (until central storage exists)
 const DRAFT_STORE = "drafts";
 const ACTIVE_DRAFT_KEY = "active";
 let draftDbPromise = null;
@@ -973,6 +974,9 @@ function openDraftDb() {
       const db = request.result;
       if (!db.objectStoreNames.contains(DRAFT_STORE)) {
         db.createObjectStore(DRAFT_STORE, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(RECORD_STORE)) {
+        db.createObjectStore(RECORD_STORE, { keyPath: "record_uid" });
       }
     };
 
@@ -1014,6 +1018,112 @@ async function draftDbDelete(key = ACTIVE_DRAFT_KEY) {
   });
 }
 
+async function recordsAll() {
+  try {
+    const db = await openDraftDb();
+    if (!db.objectStoreNames.contains(RECORD_STORE)) return [];
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(RECORD_STORE, "readonly").objectStore(RECORD_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (error) { console.warn("Saved records unavailable", error); return []; }
+}
+async function recordPut(entry) {
+  const db = await openDraftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(RECORD_STORE, "readwrite");
+    tx.objectStore(RECORD_STORE).put(entry);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Could not save the record."));
+  });
+}
+
+/* ---------- record identity: readable ID + hidden unique key, never a learner name ---------- */
+const TASK_CODES = { "Composition": "COMP", "Situational Writing": "SITU", "Narrative": "NARR",
+  "Argumentative Writing": "ARGU", "Reflective Writing": "REFL", "Expository Writing": "EXPO" };
+const RECORD_ID_PATTERN = /^[A-Z0-9]+(?:-[A-Z0-9]+){1,6}$/;
+let currentRecordUid = null;
+let currentFileHash = null;
+let recordSavedAt = null;
+
+function newRecordUid() {
+  return (crypto?.randomUUID?.() || `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`);
+}
+function ensureRecordIdentity() { if (!currentRecordUid) currentRecordUid = newRecordUid(); }
+function recordIdPrefix() {
+  const level = $("uploadLevel").value, year = String($("uploadYear").value || "").trim();
+  const task = TASK_CODES[$("uploadTask").value];
+  return level && /^\d{4}$/.test(year) && task ? `${level}-${year}-${task}-` : "";
+}
+async function suggestRecordId({ force = false } = {}) {
+  const input = $("uploadDocId");
+  if (!force && input.dataset.auto === "0" && input.value.trim()) return;
+  const prefix = recordIdPrefix();
+  if (!prefix) { if (input.dataset.auto !== "0") input.value = ""; updateStoragePath(); return; }
+  const used = (await recordsAll()).filter((r) => r.record_uid !== currentRecordUid).map((r) => r.id);
+  let max = 0;
+  used.forEach((id) => { if (String(id).startsWith(prefix)) max = Math.max(max, Number(String(id).slice(prefix.length)) || 0); });
+  input.value = `${prefix}${String(max + 1).padStart(3, "0")}`;
+  input.dataset.auto = "1";
+  clearFieldError("id");
+  updateStoragePath();
+  updateUploadPreview();
+}
+function storagePathFor(meta = {}) {
+  const id = meta.id || $("uploadDocId").value.trim() || "…";
+  return `corpus/${meta.year || $("uploadYear").value || "…"}/${meta.level || $("uploadLevel").value || "…"}/${id}/`;
+}
+function updateStoragePath() { const el = $("uploadStoragePath"); if (el) el.textContent = storagePathFor(); }
+
+async function sha256OfFile(file) {
+  try {
+    if (!file || !crypto?.subtle || file.size > 80 * 1024 * 1024) return null;
+    const buf = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+}
+
+function setFieldError(field, message) {
+  const holder = document.querySelector(`[data-field="${field}"]`);
+  holder?.classList.add("invalid");
+  document.querySelectorAll(`[data-error-for="${field}"]`).forEach((el) => { el.textContent = message; });
+}
+function clearFieldError(field) {
+  document.querySelector(`[data-field="${field}"]`)?.classList.remove("invalid");
+  document.querySelectorAll(`[data-error-for="${field}"]`).forEach((el) => { el.textContent = ""; });
+}
+async function validateUploadForm() {
+  ["file", "level", "year", "task", "id", "consent"].forEach(clearFieldError);
+  const errors = [];
+  const fail = (f, m) => { errors.push(f); setFieldError(f, m); };
+  if (!$("uploadFile").files?.[0]) fail("file", "Choose the scanned script.");
+  if (!$("uploadLevel").value) fail("level", "Choose the learner level.");
+  const y = Number($("uploadYear").value);
+  if (!(y >= 2000 && y <= 2100)) fail("year", "Enter a four-digit year.");
+  if (!$("uploadTask").value) fail("task", "Choose the task type.");
+  const id = $("uploadDocId").value.trim().toUpperCase();
+  $("uploadDocId").value = id;
+  if (!id) fail("id", "An ID is needed. Press “Suggest ID”.");
+  else if (!RECORD_ID_PATTERN.test(id)) fail("id", "Use capital letters, numbers and hyphens only, e.g. P6-2026-COMP-001. No names.");
+  else {
+    const clash = (await recordsAll()).find((r) => r.id === id && r.record_uid !== currentRecordUid);
+    if (clash) fail("id", `${id} is already used by a saved record. Press “Suggest ID” for the next free one.`);
+  }
+  if (!$("uploadConsent").checked) fail("consent", "Please confirm before processing.");
+  if (errors.length) {
+    const first = document.querySelector(`[data-field="${errors[0]}"]`);
+    first?.scrollIntoView({ block: "center", behavior: "smooth" });
+    (first?.querySelector("input, select"))?.focus({ preventScroll: true });
+    return false;
+  }
+  if (currentFileHash) {
+    const same = (await recordsAll()).find((r) => r.sha256 === currentFileHash && r.record_uid !== currentRecordUid);
+    if (same && !confirm(`This exact file was already saved as ${same.id} on ${new Date(same.saved_at).toLocaleDateString()}.\n\nProcess it again as a new record anyway?`)) return false;
+  }
+  return true;
+}
+
 function setDraftSaveStatus(message, state = "") {
   const target = $("draftSaveStatus");
   if (!target) return;
@@ -1028,7 +1138,8 @@ function currentSourceFileMeta() {
       name: file.name,
       size: file.size,
       type: file.type || "",
-      lastModified: file.lastModified || null
+      lastModified: file.lastModified || null,
+      sha256: currentFileHash || null
     };
   }
   return savedSourceFileMeta ? { ...savedSourceFileMeta } : null;
@@ -1037,7 +1148,7 @@ function currentSourceFileMeta() {
 function draftSnapshot() {
   return {
     key: ACTIVE_DRAFT_KEY,
-    version: "0.12",
+    version: "0.14",
     saved_at: new Date().toISOString(),
     workflow_stage: Number(uploadCurrentStep || 1),
     metadata: {
@@ -1048,7 +1159,13 @@ function draftSnapshot() {
       topic: $("uploadTopic").value.trim(),
       title: $("uploadTitle").value.trim(),
       prompt: $("uploadPrompt").value.trim(),
-      source_type: $("uploadSourceType").value
+      source_type: $("uploadSourceType").value,
+      school_code: $("uploadSchoolCode").value.trim(),
+      learner_code: $("uploadLearnerCode").value.trim(),
+      consent_confirmed: $("uploadConsent").checked,
+      id_auto: $("uploadDocId").dataset.auto !== "0",
+      record_uid: currentRecordUid,
+      record_saved_at: recordSavedAt
     },
     source_file: currentSourceFileMeta(),
     processing_route: $("processingRoute")?.textContent || "",
@@ -1065,7 +1182,8 @@ function draftSnapshot() {
     error_candidates: JSON.parse(JSON.stringify(errorCandidates || [])),
     annotations: JSON.parse(JSON.stringify(draftAnnotations || [])),
     annotation_items: JSON.parse(JSON.stringify(annotationItems || [])),
-    stage3_ui: { transcript_view: transcriptView, review_mode: reviewMode, active_issue_id: activeIssueId }
+    stage3_ui: { transcript_view: transcriptView, review_mode: reviewMode, active_issue_id: activeIssueId },
+    annotation_base_text: annotationBaseText
   };
 }
 
@@ -1198,9 +1316,17 @@ async function findAndOfferSavedDraft() {
 
 function applySavedMetadata(metadata = {}) {
   $("uploadDocId").value = metadata.id || "";
-  $("uploadLevel").value = metadata.level || "P4";
-  $("uploadYear").value = metadata.year || "2026";
-  $("uploadTask").value = metadata.task || "Composition";
+  $("uploadDocId").dataset.auto = metadata.id_auto === false ? "0" : "1";
+  $("uploadLevel").value = metadata.level || "";
+  $("uploadYear").value = metadata.year || String(new Date().getFullYear());
+  $("uploadTask").value = metadata.task || "";
+  $("uploadSchoolCode").value = metadata.school_code || "";
+  $("uploadLearnerCode").value = metadata.learner_code || "";
+  $("uploadConsent").checked = Boolean(metadata.consent_confirmed);
+  currentRecordUid = metadata.record_uid || newRecordUid();
+  recordSavedAt = metadata.record_saved_at || null;
+  if ((metadata.topic || metadata.title || metadata.prompt || metadata.school_code || metadata.learner_code) && $("uploadOptional")) $("uploadOptional").open = true;
+  updateStoragePath();
   $("uploadTopic").value = metadata.topic || "";
   $("uploadTitle").value = metadata.title || "";
   $("uploadPrompt").value = metadata.prompt || "";
@@ -1245,6 +1371,8 @@ async function restoreSavedDraft(snapshot) {
     transcriptView = snapshot?.stage3_ui?.transcript_view || "page";
     reviewMode = snapshot?.stage3_ui?.review_mode || "exceptions";
     activeIssueId = snapshot?.stage3_ui?.active_issue_id || null;
+    annotationBaseText = snapshot.annotation_base_text ?? null;
+    currentFileHash = snapshot?.source_file?.sha256 || null;
 
     $("machineText").value = snapshot.machine_text || "";
     $("verifiedText").value = snapshot.verified_text || "";
@@ -1329,22 +1457,35 @@ function reviewExportSnapshot() {
 }
 
 function currentUploadRecord() {
+  ensureRecordIdentity();
+  const id = $("uploadDocId").value.trim() || "DRAFT-001";
+  const src = currentSourceFileMeta() || {};
+  const ext = (String(src.name || "").match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase();
   return {
-    id: $("uploadDocId").value.trim() || "DRAFT-001",
+    record_uid: currentRecordUid,
+    id,
     level: $("uploadLevel").value,
     year: String($("uploadYear").value || ""),
     task: $("uploadTask").value,
+    task_code: TASK_CODES[$("uploadTask").value] || "",
+    school_code: $("uploadSchoolCode").value.trim(),
+    learner_code: $("uploadLearnerCode").value.trim(),
     topic: $("uploadTopic").value.trim(),
     prompt: $("uploadPrompt").value.trim(),
-    title: $("uploadTitle").value.trim() || "Untitled",
+    title: $("uploadTitle").value.trim(),
     source_type: $("uploadSourceType").value,
-    source_filename: $("uploadFile").files?.[0]?.name || "",
+    // the learner's original file name is NOT stored: it often contains their name
+    source_file: { stored_as: ext ? `${id}.${ext}` : id, sha256: src.sha256 || currentFileHash || null,
+                   size: src.size || null, type: src.type || "", pages: Number(importedTranscriptionReview?.page_count || 0) || null },
+    storage_path: storagePathFor({ id }),
+    consent_confirmed: $("uploadConsent").checked,
+    saved_at: recordSavedAt,
     text: consolidatedVerifiedText(),
     transcription_verified: transcriptionVerified(),
     transcription_review: reviewExportSnapshot(),
     annotations: draftAnnotations,
     annotation_review: (annotationItems || []).map(({ occurrences, ...rest }) => rest),
-    schema_version: "0.12"
+    schema_version: "0.14"
   };
 }
 
@@ -1367,7 +1508,11 @@ function goUploadStep(step) {
   }
   if (uploadCurrentStep === 3) renderStructuredReview();
   if (uploadCurrentStep === 4) renderAnnotationWorkspace();
-  if (uploadCurrentStep === 5) renderRecordReview();
+  if (uploadCurrentStep === 5) {
+    $("recordSaveView").classList.remove("hidden");
+    $("recordSavedView").classList.add("hidden");
+    renderRecordReview();
+  }
   scheduleDraftAutosave();
 }
 
@@ -1642,8 +1787,8 @@ function rerenderReviewPreservingEditor() {
   if (uploadCurrentStep !== 3) return;
   const active = document.activeElement;
   // someone is typing in the review rail: refresh only the passive panels
-  if (active?.closest?.("#s3Rail") && /INPUT|TEXTAREA/.test(active.tagName)) {
-    renderTranscriptPanel();
+  if (active?.closest?.("#s3Rail, #s3Transcript") && /INPUT|TEXTAREA/.test(active.tagName)) {
+    if (!active.closest("#s3Transcript")) renderTranscriptPanel();
     updateReviewProgress();
     return;
   }
@@ -1963,23 +2108,17 @@ function updateUploadPreview() {
       `;
     } else {
       $("uploadPreview").className = "upload-preview empty";
-      $("uploadPreview").textContent = "Select a file to preview its metadata.";
+      $("uploadPreview").textContent = "No file selected yet.";
     }
     return;
   }
 
   $("uploadPreview").classList.remove("empty");
   $("uploadPreview").innerHTML = `
-    <strong>${escapeHtml(file.name)}</strong><br>
-    <span class="small">
-      ID: ${escapeHtml($("uploadDocId").value.trim() || "Draft")}
-      · Level: ${escapeHtml(levelLabel($("uploadLevel").value))}
-      · Year: ${escapeHtml($("uploadYear").value || "—")}
-      · Task: ${escapeHtml($("uploadTask").value)}
-      · Topic: ${escapeHtml($("uploadTopic").value || "Unspecified")}
-      · Route: ${escapeHtml(detectProcessingRoute(file))}
-      · ${(file.size / 1024).toFixed(1)} KB
-    </span>
+    <strong>${escapeHtml(file.name)}</strong>
+    <span class="small muted"> · ${(file.size / 1024).toFixed(1)} KB · ${escapeHtml(detectProcessingRoute(file))}</span><br>
+    <span class="small">Will be stored as <code>${escapeHtml(($("uploadDocId").value.trim() || "…") + (file.name.match(/\.[a-z0-9]+$/i)?.[0] || "").toLowerCase())}</code>
+      — the original file name is not kept.</span>
   `;
 }
 
@@ -1991,52 +2130,134 @@ function prettyCategory(value = "") {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function recordChecks(record) {
+  const st = typeof stage3Stats === "function" && importedTranscriptionReview ? stage3Stats() : null;
+  const items = annotationItems || [];
+  const pending = items.filter((i) => i.status === "pending").length;
+  const accepted = items.filter((i) => i.status === "accepted").length;
+  const rejected = items.filter((i) => i.status === "rejected").length;
+  const openIssues = st ? st.issues - st.resolved : 0;
+  return { st, pending, accepted, rejected, openIssues, words: countWords(record.text),
+    detectionRun: Boolean(annotationBaseText) || items.length > 0 };
+}
 function renderRecordReview() {
   const record = currentUploadRecord();
-  const json = JSON.stringify(record, null, 2);
+  const c = recordChecks(record);
+  const ok = (good, text, warn) => `<li class="${good ? "ok" : "warn"}"><span>${good ? "✓" : "!"}</span>${good ? text : warn}</li>`;
+  const byGroup = {};
+  draftAnnotations.forEach((a) => { byGroup[a.group] = (byGroup[a.group] || 0) + 1; });
+  const groupRows = Object.entries(byGroup).map(([g, n]) =>
+    `<span class="lg g-${String(g).toLowerCase()}">${escapeHtml(groupInfo(g)?.ta || g)} · ${n}</span>`).join("");
 
   $("recordReview").innerHTML = `
     <div class="record-review-grid">
       <div class="review-box">
-        <h4>Metadata</h4>
-        <div class="small">
-          <strong>ID:</strong> ${escapeHtml(record.id)}<br>
-          <strong>Level:</strong> ${escapeHtml(levelLabel(record.level))}<br>
-          <strong>Year:</strong> ${escapeHtml(record.year || "—")}<br>
-          <strong>Task:</strong> ${escapeHtml(record.task)}<br>
-          <strong>Topic:</strong> ${escapeHtml(record.topic || "Unspecified")}<br>
-          <strong>Title:</strong> <span class="tamil">${escapeHtml(record.title)}</span><br>
-          <strong>Prompt:</strong> <span class="tamil">${escapeHtml(record.prompt || "—")}</span><br>
-          <strong>Source:</strong> ${escapeHtml(record.source_filename || "—")}
-        </div>
+        <h4>Ready to save?</h4>
+        <ul class="record-checks">
+          ${ok(true, `Details: ${escapeHtml(levelLabel(record.level) || "—")} · ${escapeHtml(record.year)} · ${escapeHtml(record.task || "—")}`)}
+          ${ok(!c.st || (c.openIssues === 0 && c.st.reviewedPages === c.st.pages),
+               `Transcript reviewed${c.st ? ` (${c.st.pages} page${c.st.pages === 1 ? "" : "s"})` : ""} · ${c.words.toLocaleString()} words`,
+               `Transcript: ${c.openIssues} word${c.openIssues === 1 ? "" : "s"} still to check`)}
+          ${ok(c.detectionRun, "Error detection run", "Error detection has not been run (you can still save manual annotations)")}
+          ${ok(c.pending === 0, `${c.accepted} error${c.accepted === 1 ? "" : "s"} annotated · ${c.rejected} suggestion${c.rejected === 1 ? "" : "s"} rejected`,
+               `${c.pending} suggestion${c.pending === 1 ? "" : "s"} still pending (they will not be saved as errors)`)}
+        </ul>
+        ${groupRows ? `<div class="s4-legend small record-groups">${groupRows}</div>` : ""}
       </div>
       <div class="review-box">
-        <h4>Record summary</h4>
-        <div class="small">
-          <strong>Verified words:</strong> ${countWords(record.text)}<br>
-          <strong>Annotations:</strong> ${record.annotations.length}<br>
-          <strong>Verification:</strong> ${transcriptionVerified() ? "Confirmed" : "Not confirmed"}
-        </div>
+        <h4>Record</h4>
+        <dl class="record-meta small">
+          <dt>Record ID</dt><dd><code>${escapeHtml(record.id)}</code></dd>
+          <dt>Stored at</dt><dd><code>${escapeHtml(record.storage_path)}</code></dd>
+          <dt>Scan file</dt><dd><code>${escapeHtml(record.source_file.stored_as)}</code></dd>
+          ${record.school_code ? `<dt>School code</dt><dd>${escapeHtml(record.school_code)}</dd>` : ""}
+          ${record.learner_code ? `<dt>Learner code</dt><dd>${escapeHtml(record.learner_code)}</dd>` : ""}
+          ${record.topic ? `<dt>Topic</dt><dd>${escapeHtml(record.topic)}</dd>` : ""}
+          ${record.title ? `<dt>Title</dt><dd class="tamil">${escapeHtml(record.title)}</dd>` : ""}
+          ${record.prompt ? `<dt>Prompt</dt><dd class="tamil">${escapeHtml(record.prompt)}</dd>` : ""}
+          ${recordSavedAt ? `<dt>Last saved</dt><dd>${escapeHtml(new Date(recordSavedAt).toLocaleString())}</dd>` : ""}
+        </dl>
       </div>
     </div>
     <div class="review-box">
-      <h4>Verified learner text</h4>
-      <div class="tamil learner-text">${escapeHtml(record.text || "No verified text entered.")}</div>
+      <h4>Final learner text</h4>
+      <div class="tamil learner-text">${escapeHtml(record.text || "No verified text yet.")}</div>
     </div>
-    <h4 style="margin-top:18px">JSON record</h4>
-    <pre class="review-json" id="reviewJson">${escapeHtml(json)}</pre>
+    <details class="record-json"><summary>Technical view (JSON)</summary>
+      <pre class="review-json" id="reviewJson">${escapeHtml(JSON.stringify(record, null, 2))}</pre></details>
   `;
+  $("saveRecordBtn").textContent = recordSavedAt ? "Save changes ✓" : "Save record ✓";
+}
+
+async function saveRecord() {
+  const record = currentUploadRecord();
+  const c = recordChecks(record);
+  if (!record.text.trim()) { alert("There is no learner text to save yet."); return; }
+  if (!RECORD_ID_PATTERN.test(record.id)) { alert("The record ID is missing or invalid. Go back to step 1 and press “Suggest ID”."); return; }
+  const clash = (await recordsAll()).find((r) => r.id === record.id && r.record_uid !== record.record_uid);
+  if (clash) { alert(`${record.id} is already used by another saved record. Go back to step 1 and press “Suggest ID”.`); return; }
+  const warn = [];
+  if (c.openIssues) warn.push(`${c.openIssues} transcript word(s) are still unchecked.`);
+  if (c.pending) warn.push(`${c.pending} error suggestion(s) are still pending and will not be saved as errors.`);
+  if (warn.length && !confirm(`${warn.join("\n")}\n\nSave anyway?`)) return;
+
+  const now = new Date().toISOString();
+  record.created_at = record.created_at || now;
+  record.saved_at = now;
+  $("saveRecordBtn").disabled = true;
+  try {
+    const previous = (await recordsAll()).find((r) => r.record_uid === record.record_uid);
+    await recordPut({ record_uid: record.record_uid, id: record.id, level: record.level, year: record.year, task: record.task,
+      sha256: record.source_file.sha256, words: c.words, errors: c.accepted,
+      created_at: previous?.created_at || now, saved_at: now, record: { ...record, created_at: previous?.created_at || now } });
+    recordSavedAt = now;
+    await draftDbDelete().catch(() => {});
+    setDraftSaveStatus("Record saved", "saved");
+    await showRecordSaved(record, c, Boolean(previous));
+  } catch (error) {
+    alert(`Could not save the record in this browser: ${error.message}\n\nDownload the JSON as a backup instead.`);
+  } finally {
+    $("saveRecordBtn").disabled = false;
+  }
+}
+
+async function showRecordSaved(record, c, updated = false) {
+  const all = (await recordsAll()).sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)));
+  $("recordSaveView").classList.add("hidden");
+  $("recordSavedView").classList.remove("hidden");
+  $("recordSavedView").querySelector("h3").textContent = updated ? "Record updated" : "Record saved";
+  $("savedRecordId").textContent = record.id;
+  $("savedRecordSummary").innerHTML = [
+    [c.words.toLocaleString(), "words"], [c.accepted, c.accepted === 1 ? "error annotated" : "errors annotated"],
+    [record.source_file.pages || 1, (record.source_file.pages || 1) === 1 ? "page" : "pages"],
+    [levelLabel(record.level), record.year]
+  ].map(([n, l]) => `<div><strong>${escapeHtml(String(n))}</strong><span>${escapeHtml(String(l))}</span></div>`).join("");
+  $("savedRecordWhere").innerHTML = `Saved in this browser's corpus store as <code>${escapeHtml(record.storage_path)}</code>.
+    Central storage isn't connected yet, so <strong>download a copy</strong> as a backup or to share it.`;
+  $("savedRecordCount").textContent = `(${all.length})`;
+  $("savedRecordList").innerHTML = `<table class="saved-table small"><thead><tr><th>ID</th><th>Level</th><th>Words</th><th>Errors</th><th>Saved</th><th></th></tr></thead><tbody>
+    ${all.map((r) => `<tr><td><code>${escapeHtml(r.id)}</code></td><td>${escapeHtml(r.level)}</td><td>${r.words ?? ""}</td><td>${r.errors ?? ""}</td>
+      <td>${escapeHtml(new Date(r.saved_at).toLocaleString())}</td>
+      <td><button type="button" class="text-button" data-download-record="${escapeHtml(r.record_uid)}">Download</button></td></tr>`).join("")}
+    </tbody></table>`;
+  $("savedRecordList").querySelectorAll("[data-download-record]").forEach((b) => b.addEventListener("click", () => {
+    const r = all.find((x) => x.record_uid === b.dataset.downloadRecord);
+    if (r) downloadJson(r.record, `${r.id}.json`);
+  }));
+  $("recordSavedView").scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function downloadJson(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function downloadRecordJson() {
   const record = currentUploadRecord();
-  const blob = new Blob([JSON.stringify(record, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${record.id || "corpus-record"}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadJson(record, `${record.id || "corpus-record"}.json`);
 }
 
 async function copyRecordJson() {
@@ -2049,16 +2270,35 @@ async function copyRecordJson() {
   }
 }
 
-function resetUploadWorkflow({ clearSaved = true } = {}) {
+function resetUploadWorkflow({ clearSaved = true, keepContext = false } = {}) {
   restoringDraft = true;
   clearTimeout(draftAutosaveTimer);
 
   $("uploadDocId").value = "";
-  $("uploadYear").value = "2026";
-  $("uploadTopic").value = "";
+  $("uploadDocId").dataset.auto = "1";
+  if (!keepContext) {
+    // "Start the next script" keeps level, year, task, school and prompt: a class set is usually uploaded together
+    $("uploadLevel").value = "";
+    $("uploadYear").value = String(new Date().getFullYear());
+    $("uploadTask").value = "";
+    $("uploadSchoolCode").value = "";
+    $("uploadTopic").value = "";
+    $("uploadPrompt").value = "";
+    $("uploadSourceType").value = "auto";
+  }
+  $("uploadLearnerCode").value = "";
   $("uploadTitle").value = "";
-  $("uploadPrompt").value = "";
-  $("uploadSourceType").value = "auto";
+  $("uploadConsent").checked = keepContext ? $("uploadConsent").checked : false;
+  currentRecordUid = newRecordUid();
+  currentFileHash = null;
+  recordSavedAt = null;
+  annotationBaseText = null;
+  $("recordSaveView")?.classList.remove("hidden");
+  $("recordSavedView")?.classList.add("hidden");
+  ["file", "level", "year", "task", "id", "consent"].forEach(clearFieldError);
+  $("uploadDrop")?.classList.remove("has-file");
+  const dropMain = $("uploadDrop")?.querySelector(".u1-drop-main");
+  if (dropMain) dropMain.innerHTML = "Drop the scanned script here, or <u>choose a file</u>";
   $("uploadFile").value = "";
   $("recognitionJsonFile").value = "";
   savedSourceFileMeta = null;
@@ -2155,7 +2395,32 @@ function wireNavigation() {
     button.addEventListener("click", () => goUploadStep(button.dataset.prevStep));
   });
 
-  ["uploadDocId", "uploadLevel", "uploadYear", "uploadTask", "uploadTopic", "uploadTitle", "uploadPrompt", "uploadSourceType"].forEach((id) => {
+    ["uploadLevel", "uploadYear", "uploadTask"].forEach((id) => $(id).addEventListener("change", () => {
+    clearFieldError(id.replace("upload", "").toLowerCase());
+    suggestRecordId();
+  }));
+  $("uploadDocId").addEventListener("input", () => {
+    $("uploadDocId").dataset.auto = $("uploadDocId").value.trim() ? "0" : "1";
+    clearFieldError("id"); updateStoragePath();
+  });
+  $("uploadNewIdBtn").addEventListener("click", () => suggestRecordId({ force: true }).then(scheduleDraftAutosave));
+  $("uploadConsent").addEventListener("change", () => { clearFieldError("consent"); scheduleDraftAutosave(); });
+  const drop = $("uploadDrop");
+  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    if (!ev.dataTransfer?.files?.length) return;
+    $("uploadFile").files = ev.dataTransfer.files;
+    $("uploadFile").dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  $("saveRecordBtn").addEventListener("click", saveRecord);
+  $("downloadAllRecordsBtn").addEventListener("click", async () => {
+    const all = await recordsAll();
+    downloadJson({ exported_at: new Date().toISOString(), records: all.map((r) => r.record) }, `corpus-records-${new Date().toISOString().slice(0, 10)}.json`);
+  });
+
+  ["uploadDocId", "uploadLevel", "uploadYear", "uploadTask", "uploadTopic", "uploadTitle", "uploadPrompt", "uploadSourceType", "uploadSchoolCode", "uploadLearnerCode"].forEach((id) => {
     $(id).addEventListener("input", () => {
       updateUploadPreview();
       scheduleDraftAutosave();
@@ -2180,6 +2445,11 @@ function wireNavigation() {
   $("verificationChecked").addEventListener("change", scheduleDraftAutosave);
 
   $("uploadFile").addEventListener("change", async () => {
+    clearFieldError("file");
+    const chosen = $("uploadFile").files?.[0];
+    $("uploadDrop").classList.toggle("has-file", Boolean(chosen));
+    $("uploadDrop").querySelector(".u1-drop-main").textContent = chosen ? chosen.name : "Drop the scanned script here, or choose a file";
+    currentFileHash = chosen ? await sha256OfFile(chosen) : null;
     try {
       await loadSelectedFile();
     } catch (error) {
@@ -2202,10 +2472,7 @@ function wireNavigation() {
 
   $("uploadToProcess").addEventListener("click", async () => {
     const file = $("uploadFile").files?.[0];
-    if (!file) {
-      alert("Select a learner document first.");
-      return;
-    }
+    if (!(await validateUploadForm())) return;
 
     // Important: Stage 2 opens first. A preview/autosave/backend error must
     // never make the Process document button appear dead.
@@ -2343,9 +2610,14 @@ function wireNavigation() {
   wireStage3();
   wireStage4();
   $("uploadToReview").addEventListener("click", () => goUploadStep(5));
+  ensureRecordIdentity();
+  updateStoragePath();
   $("downloadRecordBtn").addEventListener("click", downloadRecordJson);
   $("copyRecordBtn").addEventListener("click", copyRecordJson);
-  $("resetUploadBtn").addEventListener("click", () => resetUploadWorkflow({ clearSaved: true }));
+  $("resetUploadBtn").addEventListener("click", async () => {
+    resetUploadWorkflow({ clearSaved: true, keepContext: true });
+    await suggestRecordId({ force: true });
+  });
 
   renderDraftAnnotations();
   updateRecognitionImportStatus();

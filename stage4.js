@@ -15,6 +15,7 @@ let annotationFilter = "all";      // all | pending | accepted | rejected
 let activeAnnotationId = null;
 let previewPendingCorrections = false;
 let annotationItemSeq = 0;
+let annotationBaseText = null;     // the exact text error detection ran on (to spot later transcript edits)
 
 const ENGINE_LABELS = { iyal: "Iyal", ddspell_style: "DDSpell-style", sarvam: "Sarvam", gemini: "Gemini",
                         rules: "Rules", manual: "Manual" };
@@ -124,7 +125,7 @@ function toAnnotationRecord(item) {
   };
 }
 function syncDraftAnnotations() {
-  draftAnnotations = annotationItems.filter((i) => i.status === "accepted").map(toAnnotationRecord);
+  draftAnnotations = annotationItems.filter((i) => i.status === "accepted" && !i.stale).map(toAnnotationRecord);
 }
 function ensureAnnotationItems() {
   if (annotationItems.length || (!errorCandidates.length && !draftAnnotations.length)) return;
@@ -204,7 +205,8 @@ function cardHtml(item, n) {
   const occ = item.occurrences?.length > 1
     ? `<span class="small a-occ">occurrence ${item.occurrences.findIndex(([s]) => s === item.start) + 1} of ${item.occurrences.length}
          <button type="button" class="text-button" data-a-next-occ>next ›</button></span>` : "";
-  return `<article class="a-card g-${g.toLowerCase()} s-${item.status} ${active ? "active" : ""}" data-annotation-card="${item.id}">
+  return `<article class="a-card g-${g.toLowerCase()} s-${item.status} ${active ? "active" : ""} ${item.stale ? "stale" : ""}" data-annotation-card="${item.id}">
+    ${item.stale ? '<div class="a-stale small">No longer in the text (edited in the transcript). Not saved.</div>' : ""}
     <div class="a-card-head">
       <span class="a-num">${n}</span>
       <span class="tamil a-orig">${escapeHtml(item.text) || "<em>(insertion)</em>"}</span>
@@ -294,9 +296,42 @@ function renderAnnotationTexts() {
     m.addEventListener("click", () => selectAnnotation(m.dataset.annotationId, { fromText: true }))));
 }
 
+/* The transcript can change after detection (edits in Stage 3). Re-anchor every card to the CURRENT
+   text so neither panel ever shows an old reading; cards whose words are gone are flagged, not shown. */
+function relocateAnnotationItems(text) {
+  let moved = 0, lost = 0;
+  annotationItems.forEach((it) => {
+    if (it.start != null && text.slice(it.start, it.end) === it.text) { it.stale = false; return; }
+    const occ = occurrencesOf(text, it.text);
+    if (occ.length) {
+      const near = occ.slice().sort((a, b) => Math.abs(a[0] - (it.start ?? 0)) - Math.abs(b[0] - (it.start ?? 0)))[0];
+      if (it.start != null) moved++;
+      it.start = near[0]; it.end = near[1]; it.occurrences = occ; it.stale = false;
+    } else if (it.text) {
+      it.start = null; it.end = null; it.occurrences = []; it.stale = true; lost++;
+    }
+  });
+  return { moved, lost };
+}
+function renderStaleBanner(text) {
+  const el = $("s4StaleBanner");
+  if (!el) return;
+  const changed = annotationBaseText != null && annotationBaseText !== text;
+  const lost = annotationItems.filter((i) => i.stale).length;
+  if (!changed && !lost) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = `<span><strong>The transcript was edited after detection ran.</strong>
+    ${lost ? `${lost} card${lost === 1 ? " refers" : "s refer"} to words that are no longer in the text and are set aside.` : "Cards have been re-matched to the new text."}
+    Re-run detection to check the edited words.</span>
+    <button type="button" class="primary-btn" data-s4-rerun>Re-run detection</button>`;
+  el.querySelector("[data-s4-rerun]").addEventListener("click", runErrorDetection);
+  el.classList.remove("hidden");
+}
+
 function renderAnnotationWorkspace() {
   ensureAnnotationItems();
   const text = annotationText();
+  relocateAnnotationItems(text);
+  renderStaleBanner(text);
   const hidden = $("annotationSourceText");
   if (hidden) hidden.value = text;
   renderAnnotationTexts();
@@ -409,6 +444,9 @@ async function runErrorDetection() {
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.detail || `Error detector returned HTTP ${response.status}`);
 
+    annotationBaseText = text;
+    // cards for words that were edited away are dropped on re-run (manual ones too: their words are gone)
+    annotationItems = annotationItems.filter((i) => !i.stale);
     errorCandidates = Array.isArray(payload?.candidates) ? payload.candidates.map((c) => ({ ...c, review_status: "PENDING" })) : [];
     const keep = annotationItems.filter((i) => i.status !== "pending" || i.sources.includes("manual"));
     const fresh = itemsFromCandidates(errorCandidates, text)

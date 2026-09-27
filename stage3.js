@@ -34,7 +34,8 @@ const ISSUE_KINDS = {
 };
 
 let activeIssueId = null;
-let transcriptView = "page";        // "page" | "document"
+let transcriptView = "page";        // "page" | "document" | "edit"
+let wholePageEditing = false;
 let reviewMode = "exceptions";      // "exceptions" | "all"
 let showExcludedLines = false;
 
@@ -538,6 +539,7 @@ function renderTranscriptPanel() {
     `Page ${reviewPage} of ${stats.pages} · ${stats.reviewedPages} page${stats.reviewedPages === 1 ? "" : "s"} reviewed · ${stats.words.toLocaleString()} words`;
   document.querySelectorAll("[data-transcript-view]").forEach((b) =>
     b.classList.toggle("active", b.dataset.transcriptView === transcriptView));
+  if (transcriptView === "edit") { renderTranscriptEditor(target); return; }
 
   const activeLineId = (activeIssueId && findIssue(activeIssueId)?.line?.line_id) || activeReviewLineId;
   const renderPage = (p, withHeader) => {
@@ -572,6 +574,106 @@ function renderTranscriptPanel() {
     if (p !== reviewPage) reviewPage = p;
     selectLine(el.dataset.lineId);
   }));
+}
+
+/* ---------- transcript editing (any saved line, or the whole page) ---------- */
+function editLineText(lineId, text, { silent = false } = {}) {
+  const line = reviewLines().find((l) => l.line_id === lineId);
+  if (!line) return;
+  const before = lineText(line);
+  const after = String(text || "").replace(/\s+/g, " ").trim();
+  if (after === before.trim()) return;
+  if (!after) { excludeLineQuiet(line); if (!silent) afterTranscriptEdit(); return; }
+  line.review.ocr_corrections = line.review.ocr_corrections || [];
+  line.review.ocr_corrections.push({ issue_id: null, from: before, to: after, via: "transcript_edit" });
+  line.review.verified_text = after;
+  lineIssues(line).forEach((i) => {
+    if (i.status === "open") { i.status = "resolved"; i.resolution = { action: "transcript_edit", origin: "ocr_corrected" }; }
+    i.start = null; i.end = null;                    // positions no longer meaningful after a free edit
+  });
+  line.review.method = "transcript_edit";
+  refreshLineStatus(line);
+  if (!silent) afterTranscriptEdit();
+}
+function excludeLineQuiet(line) {
+  line.review.include_in_corpus = false;
+  lineIssues(line).forEach((i) => {
+    if (i.status === "open") { i.status = "resolved"; i.resolution = { action: "exclude", origin: "excluded" }; }
+  });
+  refreshLineStatus(line);
+}
+function afterTranscriptEdit() {
+  // refresh everything except the editor itself, so the cursor is not lost
+  renderReviewPage();
+  renderReviewRail();
+  updateReviewProgress();
+  const s = stage3Stats();
+  $("s3TranscriptMeta").textContent = `Page ${reviewPage} of ${s.pages} · ${s.reviewedPages} page${s.reviewedPages === 1 ? "" : "s"} reviewed · ${s.words.toLocaleString()} words`;
+  scheduleDraftAutosave();
+}
+function applyPageText(page, text) {
+  const lines = pageLines(page).filter(lineIncluded);
+  const rows = String(text || "").split("\n").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  rows.forEach((row, i) => {
+    if (i < lines.length) { editLineText(lines[i].line_id, row, { silent: true }); return; }
+    // more rows than OCR regions: add typed lines (no scan geometry)
+    const all = importedTranscriptionReview.lines;
+    const lastIdx = all.map((l) => Number(l.page_number || 1)).lastIndexOf(page);
+    const n = all.filter((l) => String(l.line_id).startsWith(`P${page}-M-`)).length + 1;
+    const nl = { line_id: `P${page}-M-L${n}`, page_number: page, geometry: {}, primary_ocr: { engine: "typed", raw_text: "" },
+                 secondary_ocr: {}, comparison: {}, visual_review: {},
+                 review: { include_in_corpus: true, status: "CONFIRMED", method: "typed", verified_text: row, issues: [],
+                           ocr_corrections: [{ issue_id: null, from: "", to: row, via: "typed_line" }] } };
+    all.splice(lastIdx + 1, 0, nl);
+  });
+  lines.slice(rows.length).forEach((l) => excludeLineQuiet(l));   // fewer rows than regions: extra regions excluded
+  wholePageEditing = false;
+  scheduleDraftAutosave();
+  renderStructuredReview();
+}
+function renderTranscriptEditor(target) {
+  const lines = pageLines(reviewPage);
+  if (!lines.length) { target.innerHTML = '<div class="t-empty">No text on this page yet.</div>'; return; }
+  if (wholePageEditing) {
+    const txt = lines.filter(lineIncluded).map((l) => lineText(l)).join("\n");
+    target.innerHTML = `
+      <div class="t-edit-tools small">Type or paste the whole page, one written line per row. <b>Save page</b> replaces this page's transcript
+        (rows are matched to the scan's lines in order).</div>
+      <textarea class="tamil t-edit-page">${escapeHtml(txt)}</textarea>
+      <div class="t-edit-actions"><button type="button" class="primary-btn" data-edit-page-save>Save page</button>
+        <button type="button" data-edit-mode="lines">Cancel</button></div>`;
+    target.querySelector("[data-edit-page-save]").addEventListener("click", () => applyPageText(reviewPage, target.querySelector(".t-edit-page").value));
+    target.querySelector('[data-edit-mode="lines"]').addEventListener("click", () => { wholePageEditing = false; renderTranscriptPanel(); });
+    return;
+  }
+  target.innerHTML = `
+    <div class="t-edit-tools small">Edit any saved line. It saves when you leave the box (or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>).
+      <button type="button" class="text-button" data-edit-mode="page">Type the whole page instead</button></div>
+    ${lines.map((l, i) => `
+      <div class="t-edit-row ${lineIncluded(l) ? "" : "excluded"} ${l.line_id === activeReviewLineId ? "active" : ""}" data-line-id="${escapeHtml(l.line_id)}">
+        <span class="t-edit-num">${i + 1}</span>
+        <textarea class="tamil t-edit-line" rows="1" ${lineIncluded(l) ? "" : "disabled"}>${escapeHtml(lineText(l))}</textarea>
+        <button type="button" class="text-button" data-edit-include>${lineIncluded(l) ? "Exclude" : "Include"}</button>
+      </div>`).join("")}`;
+  const fit = (ta) => { ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`; };
+  target.querySelector('[data-edit-mode="page"]').addEventListener("click", () => { wholePageEditing = true; renderTranscriptPanel(); });
+  target.querySelectorAll(".t-edit-row").forEach((row) => {
+    const id = row.dataset.lineId;
+    const ta = row.querySelector("textarea");
+    fit(ta);
+    ta.addEventListener("input", () => fit(ta));
+    ta.addEventListener("focus", () => {
+      activeIssueId = null; activeReviewLineId = id;
+      target.querySelectorAll(".t-edit-row").forEach((r) => r.classList.toggle("active", r === row));
+      renderReviewPage(); requestAnimationFrame(scrollActiveRegionIntoView);
+    });
+    ta.addEventListener("change", () => editLineText(id, ta.value));
+    ta.addEventListener("keydown", (ev) => {
+      if (ev.isComposing || ev.keyCode === 229) return;
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ta.blur(); }
+    });
+    row.querySelector("[data-edit-include]").addEventListener("click", () => setLineIncluded(id, !lineIncluded(reviewLines().find((l) => l.line_id === id))));
+  });
 }
 
 /* ---------- rendering: review rail ---------- */
@@ -641,23 +743,41 @@ function renderReviewRail() {
       return `<article class="rail-item resolved ${active ? "active" : ""}" data-rail-issue="${escapeHtml(issue.id)}">
         <div class="rail-item-head"><span class="tamil rail-span">${escapeHtml(r.prev ?? issue.text)}</span>
           <span class="rail-status ok tamil">${escapeHtml(what)}</span>
-          <button type="button" class="text-button" data-issue-reopen>Undo</button></div>
+          <button type="button" class="text-button" data-issue-change title="Reopen and choose again">Change</button>
+          ${issue.start != null || r.action === "exclude" ? '<button type="button" class="text-button" data-issue-reopen>Undo</button>' : ""}</div>
       </article>`;
     }
+    const opts = issue.options || [];
+    const typed = !["NON_LEARNER"].includes(issue.kind);
+    // Active card: every choice is visible at once — A, B, or type the reading and press Enter.
+    const choices = active ? `
+        <div class="tamil rail-context">${contextHtml(line, issue)}</div>
+        <div class="rail-choices">
+          ${opts.map((o) => `<button type="button" class="rail-choice" data-issue-action="${o.key}">
+              <span class="rail-option-key">${o.key === "optionA" ? "A" : "B"}</span>
+              <span class="tamil rail-choice-text">${escapeHtml(o.text) || "<em>no reading</em>"}</span>
+              <span class="rail-choice-src">${escapeHtml(String(o.engine || "").replace(/_.*/, ""))}</span></button>`).join("")}
+          ${!opts.length && kind.actions.includes("accept") ? `<button type="button" class="rail-choice" data-issue-action="accept">
+              <span class="rail-option-key">✓</span><span class="tamil rail-choice-text">${escapeHtml(issue.text) || "—"}</span>
+              <span class="rail-choice-src">as read</span></button>` : ""}
+          ${kind.actions.includes("remove_word") ? `<button type="button" class="rail-choice" data-issue-action="remove_word">
+              <span class="rail-option-key">⌫</span><span class="rail-choice-text">Remove crossed-out word</span></button>` : ""}
+          ${typed ? `<label class="rail-choice rail-type"><span class="rail-option-key">✎</span>
+              <input class="tamil rail-edit-input" placeholder="Neither? Type the word, press Enter" /></label>` : ""}
+        </div>
+        ${typed ? '<div class="small rail-hint">Type exactly what the learner wrote, mistakes included. Learner errors are annotated in Stage 4.</div>' : ""}
+        <div class="rail-actions">
+          ${kind.actions.filter((a) => ["exclude", "keep"].includes(a)).map((a) => actionButton(a, issue)).join("")}
+          ${issue.kind !== "NON_LEARNER" ? '<button type="button" class="rail-btn subtle" data-issue-action="exclude">Exclude line</button>' : ""}
+        </div>` : `
+        <div class="rail-actions">${kind.actions.filter((a) => a !== "edit").map((a) => actionButton(a, issue)).join("")}
+          ${typed ? '<button type="button" class="rail-btn" data-issue-action="edit">Type…</button>' : ""}
+          ${issue.kind !== "NON_LEARNER" ? '<button type="button" class="rail-btn subtle" data-issue-action="exclude">Exclude line</button>' : ""}</div>`;
     return `<article class="rail-item ${active ? "active" : ""}" data-rail-issue="${escapeHtml(issue.id)}">
       <div class="rail-item-head"><span class="rail-num">${n}</span>
         <span class="tamil rail-span">${escapeHtml(issue.text.length > 60 ? issue.text.slice(0, 57) + "…" : issue.text) || "—"}</span></div>
       <div class="rail-kind">${escapeHtml(kind.label)}${issue.confidence != null ? ` · ${Math.round(issue.confidence * 100)}%` : ""}</div>
-      ${active ? `
-        <div class="tamil rail-context">${contextHtml(line, issue)}</div>
-        ${(issue.options || []).length ? `<div class="rail-options">${issue.options.map((o) => `
-          <div class="rail-option"><span class="rail-option-key">${o.key === "optionA" ? "A" : "B"}</span>
-            <span class="tamil">${escapeHtml(o.text) || "<em>no reading</em>"}</span></div>`).join("")}</div>` : ""}
-        <div class="rail-edit hidden"><input class="tamil rail-edit-input" value="${escapeHtml(issue.text)}" />
-          <div class="small rail-hint">Type what the learner actually wrote — keep their own mistakes. Learner errors are annotated in Stage 4.</div>
-          <button type="button" class="rail-btn primary-btn" data-issue-save>Save</button></div>` : ""}
-      <div class="rail-actions">${kind.actions.map((a) => actionButton(a, issue)).join("")}
-        ${active && issue.kind !== "NON_LEARNER" ? '<button type="button" class="rail-btn subtle" data-issue-action="exclude">Exclude line</button>' : ""}</div>
+      ${choices}
     </article>`;
   };
 
@@ -670,31 +790,39 @@ function renderReviewRail() {
         ? ' <button type="button" class="rail-btn primary-btn" data-rail-next-page>Next page →</button>'
         : ' All pages can now continue to error annotation.'}</div>` : ""}
     ${done.length ? `<details class="rail-resolved" ${pageDone ? "open" : ""}><summary>Resolved on this page (${done.length})</summary>${done.map((x) => card(x)).join("")}</details>` : ""}
-    <div class="rail-foot small">Shortcuts: <kbd>J</kbd>/<kbd>K</kbd> next/previous · <kbd>A</kbd> accept / option A · <kbd>B</kbd> option B · <kbd>E</kbd> edit · <kbd>X</kbd> exclude</div>`;
+    <div class="rail-foot small">Shortcuts: <kbd>J</kbd>/<kbd>K</kbd> next/previous · <kbd>A</kbd> option A / accept · <kbd>B</kbd> option B · <kbd>E</kbd> type · <kbd>X</kbd> exclude line</div>`;
 
   target.querySelectorAll("[data-rail-issue]").forEach((el) => {
     const id = el.dataset.railIssue;
     el.addEventListener("click", (ev) => { if (!ev.target.closest("button, input")) selectIssue(id); });
     el.querySelectorAll("[data-issue-action]").forEach((b) => b.addEventListener("click", () => {
       const action = b.dataset.issueAction;
-      if (action === "edit") {
-        if (id !== activeIssueId) { selectIssue(id); }
-        const box = $("s3Rail").querySelector(`[data-rail-issue="${CSS.escape(id)}"] .rail-edit`);
-        box?.classList.remove("hidden");
-        const input = box?.querySelector("input");
-        input?.focus(); input?.select();
-        return;
-      }
+      if (action === "edit") { focusTypeBox(id); return; }
       resolveIssue(id, action);
     }));
-    el.querySelector("[data-issue-save]")?.addEventListener("click", () => resolveIssue(id, "edit", el.querySelector(".rail-edit-input").value));
-    el.querySelector(".rail-edit-input")?.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") { ev.preventDefault(); resolveIssue(id, "edit", ev.target.value); }
-      if (ev.key === "Escape") el.querySelector(".rail-edit").classList.add("hidden");
+    const input = el.querySelector(".rail-edit-input");
+    input?.addEventListener("keydown", (ev) => {
+      // Tamil input methods use Enter to CONFIRM the composed word; only a plain Enter saves.
+      if (ev.isComposing || ev.keyCode === 229) return;
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const v = ev.target.value.trim();
+        if (v) resolveIssue(id, "edit", v);
+      }
+      if (ev.key === "Escape") ev.target.blur();
     });
     el.querySelector("[data-issue-reopen]")?.addEventListener("click", () => reopenIssue(id));
+    el.querySelector("[data-issue-change]")?.addEventListener("click", () => { reopenIssue(id); focusTypeBox(id); });
   });
   target.querySelector("[data-rail-next-page]")?.addEventListener("click", () => $("reviewNextPage").click());
+}
+
+function focusTypeBox(id) {
+  if (id !== activeIssueId) selectIssue(id, { scroll: false });
+  requestAnimationFrame(() => {
+    const input = $("s3Rail").querySelector(`[data-rail-issue="${CSS.escape(id)}"] .rail-edit-input`);
+    if (input) { input.focus(); }
+  });
 }
 
 /* ---------- top-level ---------- */
@@ -783,14 +911,9 @@ function wireStage3() {
     const cur = activeIssueId ? findIssue(activeIssueId) : null;
     if (!cur || cur.issue.status !== "open") return;
     const acts = ISSUE_KINDS[cur.issue.kind]?.actions || [];
-    if (k === "a") resolveIssue(cur.issue.id, acts.includes("optionA") ? "optionA" : acts.includes("accept") ? "accept" : "keep");
+    if (k === "a") resolveIssue(cur.issue.id, ["optionA", "accept", "remove_word", "keep"].find((x) => acts.includes(x)));
     if (k === "b" && acts.includes("optionB")) resolveIssue(cur.issue.id, "optionB");
     if (k === "x") resolveIssue(cur.issue.id, "exclude");
-    if (k === "e") {
-      ev.preventDefault();
-      const box = document.querySelector(`#s3Rail [data-rail-issue="${CSS.escape(cur.issue.id)}"] .rail-edit`);
-      box?.classList.remove("hidden");
-      box?.querySelector("input")?.focus();
-    }
+    if (k === "e") { ev.preventDefault(); focusTypeBox(cur.issue.id); }
   });
 }
