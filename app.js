@@ -68,6 +68,11 @@ function highlight(text = "", query = "") {
   }
 }
 
+function updateWorkspaceWidth() {
+  const onUpload = $("upload")?.classList.contains("active");
+  document.body.classList.toggle("wide-workspace", Boolean(onUpload && uploadCurrentStep >= 2 && uploadCurrentStep <= 4));
+}
+
 function switchSection(section) {
   document.querySelectorAll(".page").forEach((page) => page.classList.remove("active"));
   document.querySelectorAll(".navbtn").forEach((button) => button.classList.remove("active"));
@@ -77,6 +82,7 @@ function switchSection(section) {
 
   const nav = document.querySelector(`.navbtn[data-section="${section}"]`);
   if (nav) nav.classList.add("active");
+  updateWorkspaceWidth();
 }
 
 function populateDashboard() {
@@ -1031,7 +1037,7 @@ function currentSourceFileMeta() {
 function draftSnapshot() {
   return {
     key: ACTIVE_DRAFT_KEY,
-    version: "0.11.2",
+    version: "0.12",
     saved_at: new Date().toISOString(),
     workflow_stage: Number(uploadCurrentStep || 1),
     metadata: {
@@ -1057,7 +1063,9 @@ function draftSnapshot() {
     verified_text: $("verifiedText").value || "",
     verification_checked: Boolean($("verificationChecked").checked),
     error_candidates: JSON.parse(JSON.stringify(errorCandidates || [])),
-    annotations: JSON.parse(JSON.stringify(draftAnnotations || []))
+    annotations: JSON.parse(JSON.stringify(draftAnnotations || [])),
+    annotation_items: JSON.parse(JSON.stringify(annotationItems || [])),
+    stage3_ui: { transcript_view: transcriptView, review_mode: reviewMode, active_issue_id: activeIssueId }
   };
 }
 
@@ -1133,10 +1141,11 @@ function savedDraftStats(snapshot) {
   const lines = Array.isArray(snapshot?.transcription_review?.lines)
     ? snapshot.transcription_review.lines
     : [];
-  const reviewed = lines.filter((line) =>
-    line?.review?.status === "CONFIRMED" || line?.review?.status === "IGNORED"
-  ).length;
-  const total = lines.length;
+  const issues = lines.flatMap((line) => Array.isArray(line?.review?.issues) ? line.review.issues : []);
+  const reviewed = issues.length
+    ? issues.filter((i) => i.status === "resolved").length
+    : lines.filter((line) => line?.review?.status === "CONFIRMED" || line?.review?.status === "IGNORED").length;
+  const total = issues.length || lines.length;
   const pageCount = Number(snapshot?.transcription_review?.page_count || 0);
   const page = Number(snapshot?.review_state?.page || 1);
   const anns = Array.isArray(snapshot?.annotations) ? snapshot.annotations.length : 0;
@@ -1230,6 +1239,12 @@ async function restoreSavedDraft(snapshot) {
     draftAnnotations = Array.isArray(snapshot.annotations)
       ? JSON.parse(JSON.stringify(snapshot.annotations))
       : [];
+    annotationItems = Array.isArray(snapshot.annotation_items)
+      ? JSON.parse(JSON.stringify(snapshot.annotation_items))
+      : [];
+    transcriptView = snapshot?.stage3_ui?.transcript_view || "page";
+    reviewMode = snapshot?.stage3_ui?.review_mode || "exceptions";
+    activeIssueId = snapshot?.stage3_ui?.active_issue_id || null;
 
     $("machineText").value = snapshot.machine_text || "";
     $("verifiedText").value = snapshot.verified_text || "";
@@ -1289,11 +1304,17 @@ function reviewLineText(line) {
 function consolidatedVerifiedText() {
   if (!importedTranscriptionReview) return $("verifiedText").value;
 
-  return reviewLines()
-    .filter((line) => line?.review?.include_in_corpus !== false && line?.review?.status === "CONFIRMED")
-    .map(reviewLineText)
-    .filter(Boolean)
-    .join("\n");
+  const pages = Number(importedTranscriptionReview.page_count || 1);
+  const out = [];
+  for (let p = 1; p <= pages; p++) {
+    const text = pageLines(p)
+      .filter((line) => line?.review?.include_in_corpus !== false && line?.review?.status === "CONFIRMED")
+      .map(reviewLineText)
+      .filter(Boolean)
+      .join("\n");
+    if (text) out.push(text);
+  }
+  return out.join("\n\n");
 }
 
 function transcriptionVerified() {
@@ -1321,7 +1342,9 @@ function currentUploadRecord() {
     text: consolidatedVerifiedText(),
     transcription_verified: transcriptionVerified(),
     transcription_review: reviewExportSnapshot(),
-    annotations: draftAnnotations
+    annotations: draftAnnotations,
+    annotation_review: (annotationItems || []).map(({ occurrences, ...rest }) => rest),
+    schema_version: "0.12"
   };
 }
 
@@ -1336,6 +1359,13 @@ function goUploadStep(step) {
     button.classList.toggle("active", Number(button.dataset.uploadStep) === uploadCurrentStep);
   });
 
+  updateWorkspaceWidth();
+  if (uploadCurrentStep === 3 || uploadCurrentStep === 4) {
+    // bring the workspace to the top of the window so the panels use the full height
+    requestAnimationFrame(() => document.querySelector(`[data-upload-panel="${uploadCurrentStep}"]`)
+      ?.scrollIntoView({ block: "start", behavior: restoringDraft ? "auto" : "smooth" }));
+  }
+  if (uploadCurrentStep === 3) renderStructuredReview();
   if (uploadCurrentStep === 4) renderAnnotationWorkspace();
   if (uploadCurrentStep === 5) renderRecordReview();
   scheduleDraftAutosave();
@@ -1357,6 +1387,7 @@ function normaliseImportedReview(parsed) {
     line.review.needs_alternative_ocr = Boolean(line.review.needs_alternative_ocr);
     line.review.status = line.review.status || "PENDING";
     if (line.review.verified_text == null) line.review.verified_text = line.primary_ocr.raw_text || "";
+    prepareLineForExceptionReview(line);        // stage3.js: clear lines auto-confirm, exceptions become issues
   });
 
   return clone;
@@ -1609,36 +1640,15 @@ function mergeOcrPagePayload(payload) {
 
 function rerenderReviewPreservingEditor() {
   if (uploadCurrentStep !== 3) return;
-
   const active = document.activeElement;
-  let lineId = null;
-  let selectionStart = null;
-  let selectionEnd = null;
-
-  if (active?.classList?.contains("line-verified")) {
-    const card = active.closest("[data-review-index]");
-    const idx = card ? Number(card.dataset.reviewIndex) : -1;
-    lineId = reviewLines()[idx]?.line_id || null;
-    selectionStart = active.selectionStart;
-    selectionEnd = active.selectionEnd;
+  // someone is typing in the review rail: refresh only the passive panels
+  if (active?.closest?.("#s3Rail") && /INPUT|TEXTAREA/.test(active.tagName)) {
+    renderTranscriptPanel();
+    updateReviewProgress();
+    return;
   }
-
   const scrollY = window.scrollY;
   renderStructuredReview();
-
-  if (lineId) {
-    const idx = reviewLines().findIndex((line) => line?.line_id === lineId);
-    const textarea = idx >= 0
-      ? document.querySelector(`[data-review-index="${idx}"] .line-verified`)
-      : null;
-    if (textarea) {
-      textarea.focus({ preventScroll: true });
-      if (selectionStart != null && selectionEnd != null) {
-        textarea.setSelectionRange(selectionStart, selectionEnd);
-      }
-    }
-  }
-
   window.scrollTo({ top: scrollY, behavior: "instant" });
 }
 
@@ -1818,63 +1828,6 @@ function polygonPoints(line, preview) {
   return polygon.map((p) => `${Number(p[0]) * sx},${Number(p[1]) * sy}`).join(" ");
 }
 
-function setActiveReviewLine(lineId, { scroll = true } = {}) {
-  activeReviewLineId = lineId;
-  renderReviewPage();
-  renderActiveReviewCard();
-  renderPageReviewQueue();
-  if (scroll) requestAnimationFrame(scrollActiveRegionIntoView);
-  scheduleDraftAutosave();
-}
-
-function autoAdvanceReview() {
-  const lines = pageLines();
-  const currentIndex = lines.findIndex((line) => line.line_id === activeReviewLineId);
-  const next = lines.slice(Math.max(0, currentIndex + 1)).find((line) => !reviewedLine(line))
-    || lines.find((line) => !reviewedLine(line));
-
-  if (next) {
-    setActiveReviewLine(next.line_id);
-    return;
-  }
-
-  const totalPages = Number(importedTranscriptionReview?.page_count || 1);
-  if (reviewPage < totalPages) {
-    reviewPage += 1;
-    const nextPage = pageLines(reviewPage);
-    activeReviewLineId = nextPage.find((line) => !reviewedLine(line))?.line_id || nextPage[0]?.line_id || null;
-    renderStructuredReview();
-  } else {
-    renderStructuredReview();
-  }
-}
-
-function applyReviewDecision(kind, value = "") {
-  const line = activePageLine();
-  if (!line) return;
-
-  line.review = line.review || {};
-
-  if (kind === "ignore") {
-    line.review.include_in_corpus = false;
-    line.review.status = "IGNORED";
-    line.review.verified_text = "";
-  } else {
-    const text = String(value || "").trim();
-    if (!text) {
-      alert("The verified transcription cannot be empty. Use Ignore for non-corpus content.");
-      return;
-    }
-    line.review.include_in_corpus = true;
-    line.review.verified_text = text;
-    line.review.status = "CONFIRMED";
-  }
-
-  updateReviewProgress();
-  scheduleDraftAutosave();
-  autoAdvanceReview();
-}
-
 function scrollActiveRegionIntoView() {
   const line = activePageLine();
   const preview = importedTranscriptionReview?.page_previews?.[String(reviewPage)];
@@ -1894,217 +1847,6 @@ function scrollActiveRegionIntoView() {
     top: Math.max(0, targetY - viewport.clientHeight * 0.35),
     behavior: "smooth"
   });
-}
-
-function renderReviewPage() {
-  const totalPages = Number(importedTranscriptionReview?.page_count || 1);
-  reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
-  $("reviewPageLabel").textContent = `Page ${reviewPage} of ${totalPages}`;
-  $("reviewPrevPage").disabled = reviewPage <= 1;
-  $("reviewNextPage").disabled = reviewPage >= totalPages;
-
-  const preview = importedTranscriptionReview?.page_previews?.[String(reviewPage)];
-  const stage = $("reviewPageStage");
-  const lines = pageLines();
-  const active = activePageLine();
-
-  if (!preview?.data_url) {
-    stage.style.width = "100%";
-    stage.innerHTML = `
-      <div class="review-preview-fallback">
-        <div class="empty">This page does not yet have the v0.11 image preview.</div>
-        <div class="small">Reprocess this page after deploying v0.11 to enable exact handwriting highlights.</div>
-      </div>
-    `;
-    return;
-  }
-
-  const width = Number(preview.display_width);
-  const height = Number(preview.display_height);
-  stage.style.width = `${Math.max(35, reviewZoom * 100)}%`;
-
-  stage.innerHTML = `
-    <div class="review-image-wrap" style="aspect-ratio:${width}/${height}">
-      <img src="${preview.data_url}" alt="Processed learner page ${reviewPage}" />
-      <svg class="review-overlay" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-        ${lines.map((line) => {
-          const points = polygonPoints(line, preview);
-          if (!points) return "";
-          const status = line?.review?.status || "PENDING";
-          const activeClass = active?.line_id === line.line_id ? "active" : "";
-          return `<polygon
-            points="${points}"
-            class="review-region ${activeClass} status-${escapeHtml(status.toLowerCase())}"
-            data-line-id="${escapeHtml(line.line_id)}"
-          ></polygon>`;
-        }).join("")}
-      </svg>
-    </div>
-  `;
-
-  stage.querySelectorAll("[data-line-id]").forEach((region) => {
-    region.addEventListener("click", () => setActiveReviewLine(region.dataset.lineId));
-  });
-}
-
-function renderActiveReviewCard() {
-  const target = $("activeReviewCard");
-  const line = activePageLine();
-
-  if (!line) {
-    target.innerHTML = '<div class="empty">No review items are available on this page yet.</div>';
-    return;
-  }
-
-  activeReviewLineId = line.line_id;
-
-  const aText = (line?.primary_ocr?.raw_text || "").trim();
-  const bText = (line?.secondary_ocr?.raw_text || "").trim();
-  const current = (line?.review?.verified_text ?? aText).trim();
-  const same = normalizeTamilText(aText).replace(/\s+/g, " ").trim() === normalizeTamilText(bText).replace(/\s+/g, " ").trim();
-  const flags = Array.isArray(line?.review?.flags) ? line.review.flags : [];
-  const status = line?.review?.status || "PENDING";
-
-  target.innerHTML = `
-    <article class="active-review-card">
-      <div class="active-review-head">
-        <div>
-          <strong>${escapeHtml(line.line_id)}</strong>
-          <span class="status-pill">${escapeHtml(status)}</span>
-        </div>
-        <button id="reviewDetailsToggle" type="button" class="text-button">Details</button>
-      </div>
-
-      <div class="ocr-choice-grid ${same || !bText ? "one-choice" : ""}">
-        <button type="button" class="ocr-choice" id="useOptionA">
-          <span class="choice-label">Option A</span>
-          <span class="tamil">${escapeHtml(aText || "No reading")}</span>
-        </button>
-        ${!same && bText ? `
-          <button type="button" class="ocr-choice" id="useOptionB">
-            <span class="choice-label">Option B</span>
-            <span class="tamil">${escapeHtml(bText)}</span>
-          </button>
-        ` : ""}
-      </div>
-
-      <label class="review-correction-label">
-        Correct / override
-        <textarea id="reviewCorrectionText" class="tamil review-correction">${escapeHtml(current)}</textarea>
-      </label>
-
-      <div class="review-action-row">
-        <button id="saveReviewCorrection" type="button" class="primary-btn">Save change</button>
-        <button id="ignoreReviewItem" type="button">Ignore</button>
-      </div>
-
-      <div id="reviewItemDetails" class="review-item-details hidden">
-        <div><strong>Option A engine:</strong> ${escapeHtml(line?.primary_ocr?.engine || "primary OCR")}</div>
-        <div><strong>Option B engine:</strong> ${escapeHtml(line?.secondary_ocr?.engine || "secondary OCR")}</div>
-        <div><strong>Priority:</strong> ${escapeHtml(line?.review?.priority || "NORMAL")}</div>
-        ${flags.length ? `<div><strong>Signals:</strong> ${flags.map(escapeHtml).join(", ")}</div>` : ""}
-      </div>
-    </article>
-  `;
-
-  $("useOptionA")?.addEventListener("click", () => applyReviewDecision("accept", aText));
-  $("useOptionB")?.addEventListener("click", () => applyReviewDecision("accept", bText));
-  $("saveReviewCorrection")?.addEventListener("click", () => applyReviewDecision("accept", $("reviewCorrectionText").value));
-  $("ignoreReviewItem")?.addEventListener("click", () => applyReviewDecision("ignore"));
-  $("reviewDetailsToggle")?.addEventListener("click", () => $("reviewItemDetails").classList.toggle("hidden"));
-
-  $("reviewCorrectionText")?.addEventListener("focus", () => {
-    renderReviewPage();
-    requestAnimationFrame(scrollActiveRegionIntoView);
-  });
-}
-
-function renderPageReviewQueue() {
-  const target = $("pageReviewQueue");
-  const lines = pageLines();
-  const reviewed = lines.filter(reviewedLine).length;
-  $("pageReviewProgress").textContent = `${reviewed} / ${lines.length} reviewed`;
-
-  if (!lines.length) {
-    target.innerHTML = '<div class="empty">No OCR regions on this page yet.</div>';
-    return;
-  }
-
-  target.innerHTML = lines.map((line, idx) => {
-    const active = line.line_id === activeReviewLineId;
-    const status = line?.review?.status || "PENDING";
-    const snippet = (line?.review?.verified_text ?? line?.primary_ocr?.raw_text ?? "").trim();
-    return `
-      <button type="button" class="page-review-item ${active ? "active" : ""} status-${escapeHtml(status.toLowerCase())}" data-page-line="${escapeHtml(line.line_id)}">
-        <span>${idx + 1}</span>
-        <span class="tamil">${escapeHtml(snippet || "Ignored / blank")}</span>
-        <small>${escapeHtml(status)}</small>
-      </button>
-    `;
-  }).join("");
-
-  target.querySelectorAll("[data-page-line]").forEach((button) => {
-    button.addEventListener("click", () => setActiveReviewLine(button.dataset.pageLine));
-  });
-}
-
-function renderStructuredReview() {
-  const structured = $("structuredReviewMode");
-  const simple = $("simpleReviewMode");
-
-  if (!importedTranscriptionReview) {
-    structured.classList.add("hidden");
-    simple.classList.remove("hidden");
-    $("reviewProgress").textContent = "Manual verification";
-    renderSourcePreview("simpleVerifySourcePreview");
-    return;
-  }
-
-  structured.classList.remove("hidden");
-  simple.classList.add("hidden");
-
-  const totalPages = Number(importedTranscriptionReview.page_count || 1);
-  reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
-  const lines = pageLines();
-
-  if (!activeReviewLineId || !lines.some((line) => line.line_id === activeReviewLineId)) {
-    activeReviewLineId = lines.find((line) => !reviewedLine(line))?.line_id || lines[0]?.line_id || null;
-  }
-
-  renderReviewPage();
-  renderActiveReviewCard();
-  renderPageReviewQueue();
-  updateReviewProgress();
-}
-
-function updateReviewProgress() {
-  if (!importedTranscriptionReview) {
-    $("reviewProgress").textContent = "Manual verification";
-    return;
-  }
-
-  const lines = reviewLines();
-  const reviewed = lines.filter(reviewedLine).length;
-  const included = lines.filter((line) => line?.review?.include_in_corpus !== false);
-  const confirmed = included.filter((line) => line?.review?.status === "CONFIRMED");
-  const ignored = lines.filter((line) => line?.review?.status === "IGNORED").length;
-
-  $("reviewProgress").textContent = `${reviewed}/${lines.length} reviewed`;
-  $("reviewSummary").textContent =
-    `Page ${reviewPage}: ${pageLines().filter(reviewedLine).length}/${pageLines().length} reviewed · Document: ${confirmed.length} included · ${ignored} ignored`;
-
-  $("uploadToAnnotate").disabled = !included.length || confirmed.length !== included.length || reviewed !== lines.length;
-}
-
-
-function confirmAllIncludedLines() {
-  if (!importedTranscriptionReview) return;
-
-  reviewLines().forEach((line) => {
-    if (line?.review?.include_in_corpus !== false) line.review.status = "CONFIRMED";
-  });
-
-  renderStructuredReview();
 }
 
 function detectProcessingRoute(file) {
@@ -2249,271 +1991,6 @@ function prettyCategory(value = "") {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function renderAnnotationWorkspace() {
-  const text = consolidatedVerifiedText() || $("verifiedText").value || "";
-  $("annotationSourceText").value = text;
-  renderErrorCandidates();
-  renderDraftAnnotations();
-
-  const status = $("annotationStatus");
-  if (status) status.textContent = draftAnnotations.length
-    ? `${draftAnnotations.length} accepted`
-    : "Ready for review";
-}
-
-function selectAnnotationSourceText() {
-  const box = $("annotationSourceText");
-  const start = box.selectionStart;
-  const end = box.selectionEnd;
-  if (end > start) {
-    const selected = box.value.slice(start, end).trim();
-    if (selected) $("annotationText").value = selected;
-  }
-}
-
-function addAcceptedAnnotation(candidate, categoryOverride = "") {
-  const category = categoryOverride || candidate.category || "OTHER";
-  const duplicate = draftAnnotations.some((a) =>
-    normalizeTamilText(a.text || "") === normalizeTamilText(candidate.learner_form || "")
-    && String(a.category || "").toUpperCase() === String(category).toUpperCase()
-  );
-
-  if (!duplicate) {
-    draftAnnotations.push({
-      text: candidate.learner_form || "",
-      category,
-      suggested: candidate.suggested_correction || "",
-      note: candidate.note || "",
-      source: (candidate.engines || []).join("+") || "ai"
-    });
-  }
-  renderDraftAnnotations();
-  renderAnnotationWorkspace();
-  scheduleDraftAutosave();
-}
-
-function renderErrorCandidates() {
-  const target = $("errorCandidateList");
-  if (!target) return;
-
-  if (!errorCandidates.length) {
-    target.innerHTML = '<div class="empty">No automatic candidates loaded. Run candidate detection, or add annotations manually.</div>';
-    return;
-  }
-
-  target.innerHTML = errorCandidates.map((c, i) => {
-    const status = c.review_status || "PENDING";
-    const engines = Array.isArray(c.engines) ? c.engines : [];
-    const cats = Array.isArray(c.category_options) && c.category_options.length
-      ? c.category_options
-      : [c.category || "OTHER"];
-
-    return `
-      <article class="error-candidate ${status !== "PENDING" ? "resolved" : ""}" data-candidate-index="${i}">
-        <div class="candidate-head">
-          <div>
-            <strong class="tamil">${escapeHtml(c.learner_form || "")}</strong>
-            ${c.agreement ? '<span class="agreement-chip">Cross-layer agreement</span>' : ""}
-          </div>
-          <span class="small">${escapeHtml(engines.join(" + ") || "candidate")}</span>
-        </div>
-
-        <div class="candidate-meta">
-          <label>
-            Tag
-            <select data-candidate-category>
-              ${cats.concat(
-                ["SPELLING","GRAMMAR","PUNCTUATION","WORD_CHOICE","WORD_FORM","MISSING_WORD","EXTRA_WORD","OTHER"]
-                  .filter((x) => !cats.includes(x))
-              ).map((cat) => `<option value="${escapeHtml(cat)}" ${cat === c.category ? "selected" : ""}>${escapeHtml(prettyCategory(cat))}</option>`).join("")}
-            </select>
-          </label>
-          <label>
-            Suggested form
-            <input data-candidate-suggested class="tamil" value="${escapeHtml(c.suggested_correction || "")}" />
-          </label>
-        </div>
-
-        ${c.note ? `<div class="small candidate-note">${escapeHtml(c.note)}</div>` : ""}
-        ${Array.isArray(c.evidence) && c.evidence.length > 1 ? `
-          <details class="candidate-evidence">
-            <summary>Evidence from ${c.evidence.length} detector result(s)</summary>
-            ${c.evidence.map((e) => `
-              <div class="small evidence-row">
-                <strong>${escapeHtml((e.engines || []).join(" + ") || "detector")}:</strong>
-                ${escapeHtml(prettyCategory(e.category || "OTHER"))}
-                ${e.suggested_correction ? ` → <span class="tamil">${escapeHtml(e.suggested_correction)}</span>` : ""}
-              </div>
-            `).join("")}
-          </details>
-        ` : ""}
-
-        <div class="candidate-actions">
-          <button type="button" class="primary-btn" data-candidate-accept>Accept</button>
-          <button type="button" data-candidate-edit>Edit manually</button>
-          <button type="button" data-candidate-reject>Reject</button>
-          ${status !== "PENDING" ? `<span class="small">Status: ${escapeHtml(status)}</span>` : ""}
-        </div>
-      </article>
-    `;
-  }).join("");
-
-  target.querySelectorAll("[data-candidate-index]").forEach((card) => {
-    const i = Number(card.dataset.candidateIndex);
-    const c = errorCandidates[i];
-    const cat = () => card.querySelector("[data-candidate-category]").value;
-    const suggested = () => card.querySelector("[data-candidate-suggested]").value.trim();
-
-    card.querySelector("[data-candidate-accept]").addEventListener("click", () => {
-      c.category = cat();
-      c.suggested_correction = suggested();
-      c.review_status = "ACCEPTED";
-      addAcceptedAnnotation(c, c.category);
-      renderErrorCandidates();
-      scheduleDraftAutosave();
-    });
-
-    card.querySelector("[data-candidate-reject]").addEventListener("click", () => {
-      c.review_status = "REJECTED";
-      renderErrorCandidates();
-      scheduleDraftAutosave();
-    });
-
-    card.querySelector("[data-candidate-edit]").addEventListener("click", () => {
-      $("annotationText").value = c.learner_form || "";
-      $("annotationCategory").value = cat();
-      $("annotationSuggested").value = suggested();
-      $("annotationNote").value = c.note || "";
-      c.review_status = "EDITING";
-      renderErrorCandidates();
-      scheduleDraftAutosave();
-      $("annotationText").focus();
-    });
-  });
-}
-
-async function runErrorDetection() {
-  if (errorDetectionRunning) return;
-  const text = consolidatedVerifiedText() || $("verifiedText").value.trim();
-  if (!text) {
-    alert("No verified learner text is available.");
-    return;
-  }
-
-  const base = ocrApiUrl();
-  if (!base) {
-    alert("Backend is not configured.");
-    return;
-  }
-
-  errorDetectionRunning = true;
-  $("runErrorDetectionBtn").disabled = true;
-  $("errorDetectionStatus").textContent = "Running Iyal + DDSpell-style + Sarvam + Gemini + rules…";
-  $("annotationStatus").textContent = "Detecting…";
-
-  try {
-    const response = await fetch(`${base}/api/detect-errors`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        level: $("uploadLevel").value,
-        task: $("uploadTask").value
-      })
-    });
-
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(payload?.detail || `Error detector returned HTTP ${response.status}`);
-    }
-
-    errorCandidates = Array.isArray(payload?.candidates)
-      ? payload.candidates.map((c) => ({ ...c, review_status: "PENDING" }))
-      : [];
-
-    const engineText = Object.entries(payload?.engines || {})
-      .map(([name, info]) => `${name}: ${info.ok ? "ok" : "unavailable"}`)
-      .join(" · ");
-
-    $("errorDetectionStatus").textContent =
-      `${errorCandidates.length} candidate(s) · ${engineText}`;
-
-    const failures = Object.entries(payload?.engines || {})
-      .filter(([, info]) => !info?.ok)
-      .map(([name, info]) => `${name}: ${info?.error || "unavailable"}`);
-
-    let diagnostics = $("engineDiagnostics");
-    if (!diagnostics) {
-      diagnostics = document.createElement("div");
-      diagnostics.id = "engineDiagnostics";
-      diagnostics.className = "engine-diagnostics small";
-      $("errorDetectionStatus").insertAdjacentElement("afterend", diagnostics);
-    }
-    diagnostics.innerHTML = failures.length
-      ? `<details><summary>Engine diagnostics (${failures.length})</summary><pre>${escapeHtml(failures.join("\n\n"))}</pre></details>`
-      : "";
-
-    $("annotationStatus").textContent = `${errorCandidates.length} candidates`;
-    renderErrorCandidates();
-    scheduleDraftAutosave();
-  } catch (error) {
-    $("errorDetectionStatus").textContent = `Detection failed: ${error.message}`;
-    $("annotationStatus").textContent = "Detection error";
-  } finally {
-    errorDetectionRunning = false;
-    $("runErrorDetectionBtn").disabled = false;
-  }
-}
-
-function addDraftAnnotation() {
-  const text = $("annotationText").value.trim();
-  if (!text) {
-    alert("Enter the learner form before adding an annotation.");
-    return;
-  }
-
-  draftAnnotations.push({
-    text,
-    category: $("annotationCategory").value,
-    suggested: $("annotationSuggested").value.trim(),
-    note: $("annotationNote").value.trim(),
-    source: "manual"
-  });
-
-  $("annotationText").value = "";
-  $("annotationSuggested").value = "";
-  $("annotationNote").value = "";
-  renderDraftAnnotations();
-  scheduleDraftAutosave();
-}
-
-function renderDraftAnnotations() {
-  const target = $("draftAnnotationList");
-
-  if (!draftAnnotations.length) {
-    target.innerHTML = '<div class="empty">No annotations added yet.</div>';
-    return;
-  }
-
-  target.innerHTML = draftAnnotations.map((a, i) => `
-    <div class="annotation-draft-item">
-      <div>
-        <strong class="tamil">${escapeHtml(a.text)}</strong>
-        <div class="small">${escapeHtml(prettyCategory(a.category))}${a.suggested ? ` · Suggested: <span class="tamil">${escapeHtml(a.suggested)}</span>` : ""}${a.note ? ` · ${escapeHtml(a.note)}` : ""}${a.source ? ` · Source: ${escapeHtml(a.source)}` : ""}</div>
-      </div>
-      <button type="button" data-remove-annotation="${i}" aria-label="Remove annotation">×</button>
-    </div>
-  `).join("");
-
-  target.querySelectorAll("[data-remove-annotation]").forEach((button) => {
-    button.addEventListener("click", () => {
-      draftAnnotations.splice(Number(button.dataset.removeAnnotation), 1);
-      renderDraftAnnotations();
-      scheduleDraftAutosave();
-    });
-  });
-}
-
 function renderRecordReview() {
   const record = currentUploadRecord();
   const json = JSON.stringify(record, null, 2);
@@ -2590,6 +2067,9 @@ function resetUploadWorkflow({ clearSaved = true } = {}) {
   reviewZoom = 1;
   activeReviewLineId = null;
   errorCandidates = [];
+  annotationItems = [];
+  activeIssueId = null;
+  activeAnnotationId = null;
   resetOcrPageProgress();
   $("machineText").value = "";
   $("verifiedText").value = "";
@@ -2782,15 +2262,25 @@ function wireNavigation() {
         return;
       }
       const included = reviewLines().filter((line) => line?.review?.include_in_corpus !== false);
-      const pending = included.filter((line) => line?.review?.status !== "CONFIRMED");
+      const openCount = included.flatMap((line) => (line?.review?.issues || []).filter((i) => i.status === "open")).length;
+      const totalPages = Number(importedTranscriptionReview.page_count || 1);
+      const unopened = [];
+      for (let p = 1; p <= totalPages; p++) {
+        if (!importedTranscriptionReview.pages_visited?.[String(p)]) unopened.push(p);
+      }
 
       if (!included.length) {
         alert("No learner-text regions are currently included in the corpus.");
         return;
       }
 
-      if (pending.length) {
-        alert(`${pending.length} included line(s) still need transcription confirmation.`);
+      if (openCount) {
+        alert(`${openCount} OCR issue(s) still need a decision in Transcription Review.`);
+        return;
+      }
+
+      if (unopened.length) {
+        alert(`Please look over page(s) ${unopened.join(", ")} before continuing — clear OCR was filled in automatically but the page hasn't been opened yet.`);
         return;
       }
 
@@ -2814,16 +2304,20 @@ function wireNavigation() {
 
   $("reviewPrevPage").addEventListener("click", () => {
     reviewPage = Math.max(1, reviewPage - 1);
-    activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
+    activeIssueId = null;
+    activeReviewLineId = null;
     renderStructuredReview();
+    $("reviewPageViewport")?.scrollTo({ top: 0 });
     scheduleDraftAutosave();
   });
 
   $("reviewNextPage").addEventListener("click", () => {
     const total = Number(importedTranscriptionReview?.page_count || 1);
     reviewPage = Math.min(total, reviewPage + 1);
-    activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
+    activeIssueId = null;
+    activeReviewLineId = null;
     renderStructuredReview();
+    $("reviewPageViewport")?.scrollTo({ top: 0 });
     scheduleDraftAutosave();
   });
 
@@ -2846,10 +2340,8 @@ function wireNavigation() {
   });
 
   $("runErrorDetectionBtn").addEventListener("click", runErrorDetection);
-  $("annotationSourceText").addEventListener("mouseup", selectAnnotationSourceText);
-  $("annotationSourceText").addEventListener("keyup", selectAnnotationSourceText);
-
-  $("addAnnotationBtn").addEventListener("click", addDraftAnnotation);
+  wireStage3();
+  wireStage4();
   $("uploadToReview").addEventListener("click", () => goUploadStep(5));
   $("downloadRecordBtn").addEventListener("click", downloadRecordJson);
   $("copyRecordBtn").addEventListener("click", copyRecordJson);

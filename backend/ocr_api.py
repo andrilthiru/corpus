@@ -26,6 +26,9 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
+from tamil_taxonomy import (CODES as TAMIL_SUBTYPE_CODES, SUBTYPES as TAMIL_SUBTYPES, SUBTYPE_TO_LEGACY,
+                            LEGACY_TO_SUBTYPE, GROUPS as TAMIL_GROUPS, assign_tag, taxonomy_prompt_block)
+
 app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.4")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
@@ -743,6 +746,7 @@ def finalise_review(records):
                 "block_confidence": r["sarvam_ocr_confidence"],
                 "confidence_band": r["confidence_band"],
                 "sarvam_block_index": r["sarvam_block_index"],
+                "block_type": r.get("block_type"),
             },
             "secondary_ocr": {
                 "engine": "google_cloud_vision",
@@ -798,11 +802,11 @@ ERROR_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "learner_form": {"type": "string"},
-                    "category": {"type": "string", "enum": ERROR_CATEGORIES},
+                    "subtype": {"type": "string", "enum": TAMIL_SUBTYPE_CODES},
                     "suggested_correction": {"type": "string"},
                     "note": {"type": "string"},
                 },
-                "required": ["learner_form", "category", "suggested_correction", "note"],
+                "required": ["learner_form", "subtype", "suggested_correction", "note"],
                 "additionalProperties": False,
             },
         }
@@ -822,8 +826,12 @@ Important rules:
 - Do not "improve" style merely because another wording sounds better.
 - Accept valid Tamil variants, names and context-dependent forms.
 - learner_form should copy the exact learner span from the supplied text whenever possible.
-- Use only these categories: {", ".join(ERROR_CATEGORIES)}.
-- For MISSING_WORD, use a short exact surrounding span as learner_form and show the proposed insertion in suggested_correction.
+- Give each candidate exactly one "subtype" code from this Tamil error taxonomy. Choose the most
+  specific code that fits; use GRAM_GEN only when no specific code fits.
+{taxonomy_prompt_block()}
+- Letter-level errors (ல/ள/ழ, ர/ற, ந/ன/ண, குறில்–நெடில், உயிர்க்குறி, புள்ளி, ஒற்று) must use those codes,
+  not WCHOICE, even when the misspelling happens to be another real word (e.g. பலம் → பழம் is LLZH).
+- For MISSING, use a short exact surrounding span as learner_form and show the proposed insertion in suggested_correction.
 - Return no candidate when uncertain.
 
 Learner level: {level or "unspecified"}
@@ -838,15 +846,18 @@ def clean_error_candidate(item, engine: str):
     if not isinstance(item, dict):
         return None
     form = str(item.get("learner_form", "") or "").strip()
-    category = str(item.get("category", "OTHER") or "OTHER").strip().upper()
+    subtype = str(item.get("subtype", "") or "").strip().upper()
+    category = str(item.get("category", "") or "").strip().upper()
     suggested = str(item.get("suggested_correction", "") or "").strip()
     note = str(item.get("note", "") or "").strip()
-    if category not in ERROR_CATEGORIES:
-        category = "OTHER"
+    if subtype not in TAMIL_SUBTYPES:
+        subtype = LEGACY_TO_SUBTYPE.get(category) if category in ERROR_CATEGORIES else None
+    category = SUBTYPE_TO_LEGACY[subtype] if subtype else (category if category in ERROR_CATEGORIES else "OTHER")
     if not form:
         return None
     return {
         "learner_form": form,
+        "subtype": subtype,
         "category": category,
         "suggested_correction": suggested,
         "note": note,
@@ -866,6 +877,7 @@ def detect_rule_candidates(text: str):
         out.append({
             "learner_form": form,
             "category": "EXTRA_WORD",
+            "subtype": "EXTRA",
             "suggested_correction": word,
             "note": "Adjacent repeated word detected by deterministic rule.",
             "engines": ["rules"],
@@ -877,6 +889,7 @@ def detect_rule_candidates(text: str):
         out.append({
             "learner_form": match.group(0),
             "category": "PUNCTUATION",
+            "subtype": "PUNCT",
             "suggested_correction": match.group(1),
             "note": "Repeated punctuation detected by deterministic rule.",
             "engines": ["rules"],
@@ -1340,13 +1353,13 @@ def detect_errors_gemini(text: str, level: str = "", task: str = ""):
                     "type": "OBJECT",
                     "properties": {
                         "learner_form": {"type": "STRING"},
-                        "category": {"type": "STRING", "enum": ERROR_CATEGORIES},
+                        "subtype": {"type": "STRING", "enum": TAMIL_SUBTYPE_CODES},
                         "suggested_correction": {"type": "STRING"},
                         "note": {"type": "STRING"},
                     },
                     "required": [
                         "learner_form",
-                        "category",
+                        "subtype",
                         "suggested_correction",
                         "note",
                     ],
@@ -1448,6 +1461,7 @@ def merge_error_candidates(*groups):
                 item["evidence"] = [{
                     "engines": list(cand.get("engines", [])),
                     "category": cand.get("category"),
+                    "subtype": cand.get("subtype"),
                     "suggested_correction": cand.get("suggested_correction", ""),
                     "note": cand.get("note", ""),
                 }]
@@ -1457,6 +1471,7 @@ def merge_error_candidates(*groups):
             found.setdefault("evidence", []).append({
                 "engines": list(cand.get("engines", [])),
                 "category": cand.get("category"),
+                "subtype": cand.get("subtype"),
                 "suggested_correction": cand.get("suggested_correction", ""),
                 "note": cand.get("note", ""),
             })
@@ -1568,10 +1583,12 @@ async def detect_errors(payload: dict = Body(...)):
         engines["gemini"] = {"ok": False, "error": str(exc)}
 
     engines["rules"] = {"ok": True, "count": len(rules)}
-    candidates = merge_error_candidates(lexical, sarvam, gemini, rules)
+    candidates = [assign_tag(c) for c in merge_error_candidates(lexical, sarvam, gemini, rules)]
 
     return {
         "categories": ERROR_CATEGORIES,
+        "taxonomy": {code: {"ta": v[0], "group": v[1], "group_ta": TAMIL_GROUPS[v[1]], "family_ta": v[2] or v[0]}
+                     for code, v in TAMIL_SUBTYPES.items()},
         "candidate_count": len(candidates),
         "engines": engines,
         "candidates": candidates,
