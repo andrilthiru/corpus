@@ -105,8 +105,6 @@ function simulateCorpus() {
     JC2: ["Argumentative Writing", "Expository Writing", "Reflective Writing", "Situational Writing"] };
   const WORDS = { P4: 150, P6: 220, SEC2: 300, SEC4: 380, JC1: 450, JC2: 500 };
   const RICH = { P4: 5.4, P6: 6.2, SEC2: 6.9, SEC4: 7.5, JC1: 8.1, JC2: 8.4 };
-  const SCHOOLS = ["SCH-A", "SCH-B", "SCH-C", "SCH-D", "SCH-E", "SCH-F"];
-  const SCHOOL_X = { "SCH-C": { LLZH: 2.2, NNN: 1.6 }, "SCH-E": { "*": 0.8 } };
   const COHORTS = [["P4", 2024, "P6", 2026, 200], ["SEC2", 2024, "SEC4", 2026, 180], ["JC1", 2025, "JC2", 2026, 140]];
   const docs = [];
   let lid = 0;
@@ -114,7 +112,6 @@ function simulateCorpus() {
     for (let i = 0; i < nLearners; i++) {
       lid += 1;
       const learner = `SIM-L${String(lid).padStart(4, "0")}`;
-      const school = pick(SCHOOLS);
       const ability = Math.exp(0.35 * gauss());          // >1 = more errors
       const consonant = Math.exp(0.45 * gauss());        // shared driver of ல/ள/ழ, ந/ன/ண, ர/ற → co-occurrence
       const growth = Math.exp(0.25 * gauss());           // individual improvement between the two levels
@@ -129,12 +126,11 @@ function simulateCorpus() {
           let lam = BASE[s][levelIndex(level)] * ability * (k ? 1 / g : 1);
           if (["LLZH", "NNN", "RR"].includes(s)) lam *= consonant;
           lam *= (TASK_X[task]?.[s] || 1) * (PROMPT_X[prompt]?.[s] || 1);
-          lam *= (SCHOOL_X[school]?.[s] || 1) * (SCHOOL_X[school]?.["*"] || 1);
           const n = poisson((lam * words) / 100);
           if (n) counts[s] = n;
         });
         docs.push({ id: `SIM-${String(docs.length + 1).padStart(4, "0")}`, simulated: true, level, year: String(year), task, prompt,
-          school_code: school, learner_code: learner, word_count: words,
+          learner_code: learner, word_count: words,
           guiraud: Math.max(3, RICH[level] - 0.9 * Math.log(ability) + 0.5 * gauss()), counts });
       });
     }
@@ -377,10 +373,10 @@ function intelHeader(I) {
     </div>
     ${INTEL.source === "simulated" ? `<div class="sim-banner"><strong>SIMULATED DEMO DATA — not real learners.</strong>
       ${simulateCorpus().length.toLocaleString()} synthetic scripts generated to show how these analyses behave at the scale of a funded project.
-      Patterns were deliberately built into the simulation (e.g. one school with more ல/ள/ழ errors, persistent ஒற்று errors, tense errors in narratives), so you can check that the engine finds them.
+      Patterns were deliberately built into the simulation (persistent ஒற்று errors, tense errors in narratives, person/number errors in formal emails, ல/ள/ழ and ந/ன/ண errors moving together), so you can check that the engine finds them.
       ${real < 30 ? `Switch to <em>Corpus data</em> once real scripts are saved (${real} so far).` : ""}</div>`
       : sampleBannerHtml(corpus) + (I.total.k < 30 ? `<div class="small muted thin-note">Only ${I.total.k} scripts: most analyses need more data and will stay quiet until then.</div>` : "")}
-    <nav class="intel-nav">${INTEL_VIEWS.map(([k, l]) => `<button type="button" data-intel-view="${k}" class="${INTEL.view === k ? "active" : ""}">${l}</button>`).join("")}</nav>`;
+    <nav class="intel-nav">${INTEL_VIEWS.filter(([k]) => k !== "schools" || I.rows.some((r) => r.school)).map(([k, l]) => `<button type="button" data-intel-view="${k}" class="${INTEL.view === k ? "active" : ""}">${l}</button>`).join("")}</nav>`;
 }
 
 function viewFindings(I) {
@@ -542,6 +538,7 @@ function viewAsk() {
 
 function renderIntelligence() {
   const I = intelData();
+  if (INTEL.view === "schools" && !I.rows.some((r) => r.school)) INTEL.view = "findings";   // school view only if school codes are collected
   const body = { findings: viewFindings, development: viewDevelopment, together: viewTogether, learners: viewLearners, schools: viewSchools,
                  quality: viewQuality, prompts: viewPrompts, priorities: viewPriorities, ask: viewAsk }[INTEL.view](I);
   return `${intelHeader(I)}<div class="intel-body">${body}</div>`;
