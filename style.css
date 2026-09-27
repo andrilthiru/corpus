@@ -1479,3 +1479,12 @@ mark.a-mark.corrected.s-pending { opacity: .75; }
   .s3-panel { height: 70vh; }
   .s4-textbox { height: auto; max-height: 60vh; }
 }
+
+/* zoom controls live inside the scan pane */
+.s3-zoom { display: inline-flex; gap: 4px; }
+.s3-zoom button { padding: 3px 9px; font-size: 13px; border-radius: 7px; }
+.s3-scan .s3-panel-head .small { margin-left: auto; }
+/* tag reliability chips */
+.a-chip.tag-high { border-color: var(--g-nadai); color: var(--g-nadai); }
+.a-chip.tag-medium { border-color: #9aa3b2; color: #4b5563; }
+.a-chip.tag-low { border-color: var(--st-open); color: var(--st-open); }

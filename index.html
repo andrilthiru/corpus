@@ -239,16 +239,16 @@
               <button id="reviewNextPage" type="button">Next →</button>
             </div>
             <div id="reviewSummary" class="s3-summary small"></div>
-            <div class="s3-bar-tools">
-              <button id="reviewZoomOut" type="button" aria-label="Zoom out">−</button>
-              <button id="reviewZoomFit" type="button">Fit</button>
-              <button id="reviewZoomIn" type="button" aria-label="Zoom in">+</button>
-            </div>
           </div>
 
           <div class="s3-grid">
             <section class="s3-panel s3-scan" aria-label="Original scan">
-              <header class="s3-panel-head"><strong>Original scan</strong><span class="small">click a region to jump to it</span></header>
+              <header class="s3-panel-head"><strong>Original scan</strong><span class="small">click a region to jump to it</span>
+                <div class="s3-zoom" role="group" aria-label="Zoom">
+                  <button id="reviewZoomOut" type="button" aria-label="Zoom out">−</button>
+                  <button id="reviewZoomFit" type="button">Fit</button>
+                  <button id="reviewZoomIn" type="button" aria-label="Zoom in">+</button>
+                </div></header>
               <div id="reviewPageViewport" class="review-page-viewport">
                 <div id="reviewPageStage" class="review-page-stage">
                   <div class="empty">A processed page preview will appear here.</div>

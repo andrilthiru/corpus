@@ -30,6 +30,7 @@ and the page intro collapses, so the panels use the whole viewport.
 * **Panels are synchronised.** Clicking an issue, a transcript word or a scan region
   highlights the same place in all three panels.
 * **"Review all OCR regions"** is still available as a secondary mode, with whole-line edit and exclude/include.
+* **Zoom** (− / Fit / +) sits in the Original scan pane's header.
 * **Keyboard shortcuts:** J/K next/previous · A accept / option A · B option B · E edit · X exclude.
 * **OCR error vs learner error.** Stage 3 only records OCR corrections
   (`line.review.ocr_corrections`, and each issue's `resolution.origin` is `ocr_confirmed`,
@@ -50,6 +51,23 @@ and the page intro collapses, so the panels use the whole viewport.
   Status uses neutral treatments: dashed = pending, filled = accepted, struck through = rejected.
 * **Manual annotation:** select words in the original text, then **+ Add error**.
 
+### Automatic Tamil error tagging (backend, `backend/tamil_taxonomy.py`)
+Every detected error now arrives with a Tamil sub-type decided at the source, not translated in the browser:
+* Sarvam and Gemini are shown the full taxonomy (codes, Tamil labels, definitions, neutral
+  examples, none taken from QA1) and must return one `subtype` code.
+* **Correction analysis** reads the exact edit between the learner form and the correction:
+  ல/ள/ழ, ர/ற, ந/ன/ண, குறில்–நெடில், உயிர்க்குறி, புள்ளி, ஒற்று, spacing, punctuation, word order,
+  extra/missing word, plural, person/gender and tense endings. It tags all 23 QA1 key errors correctly.
+* **Order of trust:** rule → correction analysis (for edits it can read reliably) → both LLMs agree →
+  one LLM → weak correction analysis → default mapping.
+* **Each candidate carries** `subtype`, `subtype_ta`, `group`, `group_ta`, `family_ta` (e.g. all ல/ள/ழ,
+  ர/ற, ந/ன/ண roll up to மெய்யெழுத்துப் பிழை), `tag_source`, `tag_confidence` (high/medium/low) and
+  `subtype_options` (every sub-type any detector proposed, and who proposed it).
+* **Stage 4 cards** show "tag: correction analysis · high" and "also proposed: …". If an annotator changes
+  the type, the record keeps both (`auto_subtype`, `subtype_changed_by_annotator`), so you can later
+  measure how often automatic tags were right, per type.
+* **Legacy `category`** (SPELLING, GRAMMAR…) is still sent, so the dashboard keeps working.
+
 ### Record (`currentUploadRecord()`)
 * `annotations[]` keeps the legacy `category` (so the dashboard still works) and adds `kind`
   (always `"error"` for now; room for other annotation types later), `subtype`, `subtype_ta`,
@@ -61,8 +79,9 @@ and the page intro collapses, so the panels use the whole viewport.
 
 ## Files
 New: `taxonomy.js`, `stage3.js`, `stage4.js`, `README-v0.12.md`
-Changed: `index.html`, `app.js`, `style.css`, `backend/ocr_api.py` (one line: lines now carry
-`primary_ocr.block_type`, which helps detect headers and footers; optional, and needs a backend redeploy)
+Changed: `index.html`, `app.js`, `style.css`, `backend/ocr_api.py` (Tamil sub-type tagging; lines also
+carry `primary_ocr.block_type` for header/footer detection)
+New backend file: `backend/tamil_taxonomy.py` (must be uploaded next to `ocr_api.py`)
 Removed (obsolete overlay patches): `WIDE_UI_PATCH.css`, `stage3-three-panel.css`,
 `stage3-three-panel.js`, `APPLY_*`/`UNDO_*` scripts, `README_FIRST.txt`
 
@@ -70,4 +89,6 @@ Removed (obsolete overlay patches): `WIDE_UI_PATCH.css`, `stage3-three-panel.css
 1. Upload `index.html`, `app.js`, `style.css`, `taxonomy.js`, `stage3.js` and `stage4.js` to the repo root.
 2. Delete the obsolete files listed above from GitHub.
 3. Wait for GitHub Pages, then hard-refresh (Ctrl+F5).
-4. Optional: redeploy the backend (same `gcloud run deploy` command as v0.11.4) to get block types.
+4. Upload `backend/ocr_api.py` and the new `backend/tamil_taxonomy.py`, then redeploy the backend with
+   the same `gcloud run deploy` command as v0.11.4. Until the backend is redeployed, the frontend still
+   works: it infers the Tamil sub-type in the browser, and the cards say "inferred in browser".

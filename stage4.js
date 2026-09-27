@@ -61,10 +61,13 @@ function itemsFromCandidates(candidates, text) {
       start: free ? free[0] : null, end: free ? free[1] : null, occurrences: occ,
       text: c.learner_form || "", suggested: c.suggested_correction || "",
       subtype, auto_subtype: subtype, note: c.note || "",
+      tag_source: c.tag_source || (c.subtype ? "detector" : "browser_inference"),
+      tag_confidence: c.tag_confidence || null,
+      subtype_options: Array.isArray(c.subtype_options) ? c.subtype_options : [],
       sources: Array.isArray(c.engines) ? [...c.engines] : [],
       evidence: (Array.isArray(c.evidence) && c.evidence.length ? c.evidence : [{
         engines: c.engines || [], category: c.category, suggested_correction: c.suggested_correction, note: c.note
-      }]).map((e) => ({ ...e, subtype: inferSubtype({ ...c, category: e.category, suggested_correction: e.suggested_correction }) })),
+      }]).map((e) => ({ ...e, subtype: e.subtype || inferSubtype({ ...c, category: e.category, suggested_correction: e.suggested_correction }) })),
       agreement: Boolean(c.agreement)
     });
   });
@@ -111,6 +114,10 @@ function toAnnotationRecord(item) {
     group_ta: groupInfo(group)?.ta,
     origin: item.origin || "learner_error",
     auto_subtype: item.auto_subtype || null,
+    subtype_changed_by_annotator: Boolean(item.auto_subtype && item.auto_subtype !== item.subtype),
+    tag_source: item.tag_source || (item.sources.includes("manual") ? "annotator" : null),
+    tag_confidence: item.tag_confidence || null,
+    subtype_options: item.subtype_options || [],
     note: item.note || "",
     source: item.sources.join("+") || "manual",
     evidence: item.evidence || []
@@ -176,6 +183,19 @@ function evidenceHtml(item) {
   </details>`;
 }
 
+const TAG_SOURCE_LABELS = {
+  rule: "rule", correction_analysis: "correction analysis", llm_consensus: "Sarvam + Gemini agree",
+  llm: "single model", correction_analysis_weak: "correction analysis (weak)", default: "default mapping",
+  detector: "detector", browser_inference: "inferred in browser"
+};
+function tagChip(item) {
+  if (!item.tag_source || item.sources.includes("manual")) return "";
+  const alts = [...new Set((item.subtype_options || []).map((o) => o.subtype).filter((c) => c && c !== item.auto_subtype))];
+  const title = (item.subtype_options || []).map((o) => `${o.proposed_by}: ${o.subtype_ta || o.subtype}`).join("\n");
+  return `<span class="a-chip tag-${escapeHtml(item.tag_confidence || "na")}" title="${escapeHtml(title)}">tag: ${escapeHtml(TAG_SOURCE_LABELS[item.tag_source] || item.tag_source)}${item.tag_confidence ? ` · ${escapeHtml(item.tag_confidence)}` : ""}</span>${
+    alts.length ? `<span class="a-chip" title="${escapeHtml(title)}">also proposed: ${alts.map((c) => escapeHtml(subtypeLabel(c))).join(", ")}</span>` : ""}`;
+}
+
 function cardHtml(item, n) {
   const g = itemGroup(item);
   const active = item.id === activeAnnotationId;
@@ -196,7 +216,8 @@ function cardHtml(item, n) {
     </div>
     <div class="small a-prov">${item.sources.map((s) => `<span class="a-chip">${escapeHtml(ENGINE_LABELS[s] || s)}</span>`).join("")}
       ${item.agreement ? '<span class="a-chip agree">independent agreement</span>' : ""}
-      ${item.auto_subtype && item.auto_subtype !== item.subtype ? `<span class="a-chip">auto: ${escapeHtml(subtypeLabel(item.auto_subtype))}</span>` : ""}
+      ${tagChip(item)}
+      ${item.auto_subtype && item.auto_subtype !== item.subtype ? `<span class="a-chip">changed from auto: ${escapeHtml(subtypeLabel(item.auto_subtype))}</span>` : ""}
       ${item.start == null ? '<span class="a-chip warn">not found in text</span>' : ""} ${occ}</div>
     ${active ? `${item.note ? `<div class="small a-note">${escapeHtml(item.note)}</div>` : ""}
       <label class="small a-note-edit hidden">Note <input data-a-note value="${escapeHtml(item.note || "")}" /></label>
