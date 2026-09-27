@@ -959,7 +959,13 @@ function openDraftDb() {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();     // never block a newer version of the app opened in another tab
+      resolve(db);
+    };
+    // An older copy of the app open in another tab can block the upgrade; don't hang waiting for it.
+    request.onblocked = () => console.warn("Local storage upgrade is waiting for another tab of this app to close.");
     request.onerror = () => reject(request.error || new Error("Could not open local draft storage."));
   });
 
@@ -998,6 +1004,10 @@ async function draftDbDelete(key = ACTIVE_DRAFT_KEY) {
 }
 
 async function recordsAll() {
+  // never let local storage (e.g. blocked by another tab) stall the upload page
+  return Promise.race([recordsAllInner(), new Promise((resolve) => setTimeout(() => resolve([]), 2000))]);
+}
+async function recordsAllInner() {
   try {
     const db = await openDraftDb();
     if (!db.objectStoreNames.contains(RECORD_STORE)) return [];
@@ -1042,6 +1052,7 @@ async function suggestRecordId({ force = false } = {}) {
   if (!force && input.dataset.auto === "0" && input.value.trim()) return;
   const prefix = recordIdPrefix();
   if (!prefix) { if (input.dataset.auto !== "0") input.value = ""; updateStoragePath(); return; }
+  input.value = `${prefix}…`;                          // immediate feedback while the next number is looked up
   if (cloudReady()) {
     try {
       input.value = (await recordsApi(`/api/records/next-id?prefix=${encodeURIComponent(prefix)}`)).id;
@@ -1084,7 +1095,7 @@ function clearFieldError(field) {
   document.querySelectorAll(`[data-error-for="${field}"]`).forEach((el) => { el.textContent = ""; });
 }
 async function validateUploadForm() {
-  ["file", "level", "year", "task", "id", "consent"].forEach(clearFieldError);
+  ["file", "level", "year", "task", "id"].forEach(clearFieldError);
   const errors = [];
   const fail = (f, m) => { errors.push(f); setFieldError(f, m); };
   if (!$("uploadFile").files?.[0]) fail("file", "Choose the scanned script.");
@@ -1094,19 +1105,24 @@ async function validateUploadForm() {
   if (!$("uploadTask").value) fail("task", "Choose the task type.");
   const id = $("uploadDocId").value.trim().toUpperCase();
   $("uploadDocId").value = id;
-  if (!id) fail("id", "An ID is needed. Press “Suggest ID”.");
+  if (!id || id.endsWith("…")) fail("id", "Choose the level and task: the ID fills in automatically.");
   else if (!RECORD_ID_PATTERN.test(id)) fail("id", "Use capital letters, numbers and hyphens only, e.g. P6-2026-COMP-001. No names.");
   else if (cloudReady()) {
     try {
       const chk = await recordsApi(`/api/records/check?id=${encodeURIComponent(id)}&sha256=${encodeURIComponent(currentFileHash || "")}&record_uid=${encodeURIComponent(currentRecordUid || "")}`);
-      if (chk.id_taken_by) fail("id", `${id} is already used by another record${chk.id_taken_by.deleted ? " (since deleted — IDs are never reused)" : ""}. Press “Suggest ID” for the next free one.`);
+      if (chk.id_taken_by) {
+        if ($("uploadDocId").readOnly) await suggestRecordId({ force: true });      // automatic ID: just take the next free one
+        else fail("id", `${id} is already used by another record${chk.id_taken_by.deleted ? " (since deleted — IDs are never reused)" : ""}. Click “Use automatic ID”.`);
+      }
       uploadSameFile = chk.same_file;
     } catch (error) { fail("id", `Could not check the ID with the team corpus: ${error.message}`); }
   } else {
     const clash = (await recordsAll()).find((r) => r.id === id && r.record_uid !== currentRecordUid);
-    if (clash) fail("id", `${id} is already used by a saved record. Press “Suggest ID” for the next free one.`);
+    if (clash) {
+      if ($("uploadDocId").readOnly) await suggestRecordId({ force: true });
+      else fail("id", `${id} is already used by a saved record. Click “Use automatic ID”.`);
+    }
   }
-  if (!$("uploadConsent").checked) fail("consent", "Please confirm before processing.");
   if (errors.length) {
     const first = document.querySelector(`[data-field="${errors[0]}"]`);
     first?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -1316,6 +1332,8 @@ async function findAndOfferSavedDraft() {
 function applySavedMetadata(metadata = {}) {
   $("uploadDocId").value = metadata.id || "";
   $("uploadDocId").dataset.auto = metadata.id_auto === false ? "0" : "1";
+  $("uploadDocId").readOnly = metadata.id_auto !== false;
+  $("uploadEditIdBtn").textContent = $("uploadDocId").readOnly ? "Edit" : "Use automatic ID";
   $("uploadLevel").value = metadata.level || "";
   $("uploadYear").value = metadata.year || String(new Date().getFullYear());
   $("uploadTask").value = metadata.task || "";
@@ -2191,12 +2209,17 @@ function renderRecordReview() {
 }
 
 async function saveRecord() {
+  if (!$("uploadConsent").checked) {
+    setFieldError("consent", "Please tick the confirmation before saving.");
+    $("uploadConsent").closest("label")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
   const record = currentUploadRecord();
   const c = recordChecks(record);
   if (!record.text.trim()) { alert("There is no learner text to save yet."); return; }
-  if (!RECORD_ID_PATTERN.test(record.id)) { alert("The record ID is missing or invalid. Go back to step 1 and press “Suggest ID”."); return; }
+  if (!RECORD_ID_PATTERN.test(record.id)) { alert("The record ID is missing or invalid. Go back to step 1 and click “Use automatic ID”."); return; }
   const clash = (await recordsAll()).find((r) => r.id === record.id && r.record_uid !== record.record_uid);
-  if (clash) { alert(`${record.id} is already used by another saved record. Go back to step 1 and press “Suggest ID”.`); return; }
+  if (clash) { alert(`${record.id} is already used by another saved record. Go back to step 1 and click “Use automatic ID”.`); return; }
   const warn = [];
   if (c.openIssues) warn.push(`${c.openIssues} transcript word(s) are still unchecked.`);
   if (c.pending) warn.push(`${c.pending} error suggestion(s) are still pending and will not be saved as errors.`);
@@ -2221,7 +2244,7 @@ async function saveRecord() {
       await showRecordSaved({ ...record, storage_path: res.storage_path }, c, res.version > 1, res);
       loadCloudCorpus();
     } catch (error) {
-      if (error.code === "id_taken") alert(`${error.message}\n\nGo back to step 1 and press “Suggest ID”.`);
+      if (error.code === "id_taken") alert(`${error.message}\n\nGo back to step 1 and click “Use automatic ID”.`);
       else alert(`Could not save to the team corpus: ${error.message}\n\nYour work is still kept in this browser. Try again, or download the JSON as a backup.`);
       renderRecordReview();
     } finally {
@@ -2321,6 +2344,8 @@ function resetUploadWorkflow({ clearSaved = true, keepContext = false } = {}) {
 
   $("uploadDocId").value = "";
   $("uploadDocId").dataset.auto = "1";
+  $("uploadDocId").readOnly = true;
+  $("uploadEditIdBtn").textContent = "Edit";
   if (!keepContext) {
     // "Start the next script" keeps level, year, task, school and prompt: a class set is usually uploaded together
     $("uploadLevel").value = "";
@@ -2333,7 +2358,7 @@ function resetUploadWorkflow({ clearSaved = true, keepContext = false } = {}) {
   }
   $("uploadLearnerCode").value = "";
   $("uploadTitle").value = "";
-  $("uploadConsent").checked = keepContext ? $("uploadConsent").checked : false;
+  $("uploadConsent").checked = false;             // confirmed afresh for every script
   currentRecordUid = newRecordUid();
   currentFileHash = null;
   recordSavedAt = null;
@@ -2448,7 +2473,13 @@ function wireNavigation() {
     $("uploadDocId").dataset.auto = $("uploadDocId").value.trim() ? "0" : "1";
     clearFieldError("id"); updateStoragePath();
   });
-  $("uploadNewIdBtn").addEventListener("click", () => suggestRecordId({ force: true }).then(scheduleDraftAutosave));
+  $("uploadEditIdBtn").addEventListener("click", () => {
+    const input = $("uploadDocId");
+    input.readOnly = !input.readOnly;
+    $("uploadEditIdBtn").textContent = input.readOnly ? "Edit" : "Use automatic ID";
+    if (input.readOnly) suggestRecordId({ force: true }).then(scheduleDraftAutosave);
+    else { input.focus(); input.select(); }
+  });
   $("uploadConsent").addEventListener("change", () => { clearFieldError("consent"); scheduleDraftAutosave(); });
   const drop = $("uploadDrop");
   ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));

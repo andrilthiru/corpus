@@ -169,10 +169,10 @@
                 </label>
               </div>
               <label class="u1-id" data-field="id">
-                <span>Record ID <span class="small muted">(created for you, and used as the file name when stored)</span></span>
+                <span>Record ID <span class="small muted">(automatic — also used as the file name when stored)</span></span>
                 <span class="u1-id-row">
-                  <input id="uploadDocId" type="text" spellcheck="false" autocomplete="off" placeholder="Filled in once level, year and task are chosen" />
-                  <button id="uploadNewIdBtn" type="button" class="text-button">Suggest ID</button>
+                  <input id="uploadDocId" type="text" spellcheck="false" autocomplete="off" readonly placeholder="Filled in automatically once level and task are chosen" />
+                  <button id="uploadEditIdBtn" type="button" class="text-button">Edit</button>
                 </span>
                 <span class="field-error" data-error-for="id"></span>
               </label>
@@ -214,13 +214,6 @@
               </div>
             </details>
 
-            <label class="check-row u1-consent" data-field="consent">
-              <input id="uploadConsent" type="checkbox" />
-              <span>I confirm this script may be used for the corpus, and that <strong>no learner name or other identifying detail</strong> will go into the record. <span class="req">*</span>
-                <span class="small muted">If a name is written on the page, exclude that line in Transcription Review.</span></span>
-            </label>
-            <div class="field-error" data-error-for="consent"></div>
-
             <div id="uploadPreview" class="upload-preview empty">No file selected yet.</div>
 
             <div class="step-actions right">
@@ -238,7 +231,7 @@
               <li><strong>You can stop at any time.</strong> Work saves automatically in this browser. Come back to this page later, on the same computer and browser, and choose <em>Resume where I left off</em>.</li>
             </ol>
             <div class="u1-guide-foot small">
-              <strong>Required:</strong> script file, level, year, task type and the confirmation.<br>
+              <strong>Required:</strong> the script file, level, year and task type.<br>
               <strong>Stored as:</strong> <code id="uploadStoragePath">corpus/2026/P6/P6-2026-COMP-001/</code>
             </div>
           </aside>
@@ -449,6 +442,11 @@
             </div>
           </div>
           <div id="recordReview"></div>
+          <label class="check-row u1-consent" data-field="consent">
+            <input id="uploadConsent" type="checkbox" />
+            <span>I confirm this script may be used for the corpus, and that <strong>no learner name or other identifying detail</strong> is in the transcript or the record. <span class="req">*</span></span>
+          </label>
+          <div class="field-error" data-error-for="consent"></div>
           <div class="step-actions">
             <button type="button" data-prev-step="4">← Back to annotation</button>
             <button id="saveRecordBtn" type="button" class="primary-btn">Save record ✓</button>
