@@ -2313,7 +2313,7 @@ function renderErrorCandidates() {
         <div class="candidate-head">
           <div>
             <strong class="tamil">${escapeHtml(c.learner_form || "")}</strong>
-            ${c.agreement ? '<span class="agreement-chip">Multi-engine agreement</span>' : ""}
+            ${c.agreement ? '<span class="agreement-chip">Cross-layer agreement</span>' : ""}
           </div>
           <span class="small">${escapeHtml(engines.join(" + ") || "candidate")}</span>
         </div>
@@ -2335,6 +2335,18 @@ function renderErrorCandidates() {
         </div>
 
         ${c.note ? `<div class="small candidate-note">${escapeHtml(c.note)}</div>` : ""}
+        ${Array.isArray(c.evidence) && c.evidence.length > 1 ? `
+          <details class="candidate-evidence">
+            <summary>Evidence from ${c.evidence.length} detector result(s)</summary>
+            ${c.evidence.map((e) => `
+              <div class="small evidence-row">
+                <strong>${escapeHtml((e.engines || []).join(" + ") || "detector")}:</strong>
+                ${escapeHtml(prettyCategory(e.category || "OTHER"))}
+                ${e.suggested_correction ? ` → <span class="tamil">${escapeHtml(e.suggested_correction)}</span>` : ""}
+              </div>
+            `).join("")}
+          </details>
+        ` : ""}
 
         <div class="candidate-actions">
           <button type="button" class="primary-btn" data-candidate-accept>Accept</button>
@@ -2396,7 +2408,7 @@ async function runErrorDetection() {
 
   errorDetectionRunning = true;
   $("runErrorDetectionBtn").disabled = true;
-  $("errorDetectionStatus").textContent = "Running Tamilinaiya/Vaani + Sarvam + Gemini + rules…";
+  $("errorDetectionStatus").textContent = "Running Iyal + DDSpell-style + Sarvam + Gemini + rules…";
   $("annotationStatus").textContent = "Detecting…";
 
   try {

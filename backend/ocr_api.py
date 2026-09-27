@@ -1,4 +1,5 @@
 import base64
+from collections import defaultdict
 import io
 import json
 import os
@@ -25,7 +26,7 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.3.1")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.4")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -885,117 +886,344 @@ def detect_rule_candidates(text: str):
 
 
 
+
+IYAL_WORDLIST_URL = os.getenv(
+    "IYAL_WORDLIST_URL",
+    "https://raw.githubusercontent.com/KaniyamFoundation/iyal-tamil-spellchecker/main/collect_words/frequent_tamil_words.txt",
+)
+IYAL_MANUAL_WORDLIST_URL = os.getenv(
+    "IYAL_MANUAL_WORDLIST_URL",
+    "https://raw.githubusercontent.com/KaniyamFoundation/iyal-tamil-spellchecker/main/collect_words/manually_collected_words.txt",
+)
+
+_IYAL_WORD_FREQ = None
+_IYAL_LENGTH_INDEX = None
+_IYAL_BIGRAM_INDEX = None
+_IYAL_SOURCE_INFO = {
+    "loaded": False,
+    "source": None,
+    "word_count": 0,
+    "error": None,
+}
+
+
 def tamil_word_tokens(text: str):
-    """
-    Extract Tamil word tokens with source offsets. We preserve the exact learner
-    span in candidate annotations, while giving Tamilinaiya/Vaani adjacent words
-    as its REST_interface expects.
-    """
+    """Extract exact Tamil tokens and source offsets."""
     pattern = re.compile(r"[\p{Tamil}][\p{Tamil}\p{M}\u200c\u200d]*")
     return [
-        {
-            "text": m.group(0),
-            "start": m.start(),
-            "end": m.end(),
-        }
+        {"text": m.group(0), "start": m.start(), "end": m.end()}
         for m in pattern.finditer(text or "")
     ]
 
 
-def detect_errors_vaani(text: str):
-    """
-    Tamil-specific rule/spell candidates using the open-source Python port of
-    Tamilinaiya/Vaani. The API evaluates adjacent word pairs and can propose
-    Tamil-specific orthographic / sandhi corrections.
+def tamil_graphemes(value: str):
+    """Use Unicode grapheme clusters so Tamil combining signs stay together."""
+    return re.findall(r"\X", unicodedata.normalize("NFC", str(value or "")))
 
-    We treat the returned suggestion as a candidate only when it differs from
-    the exact learner pair. Every candidate still requires human review.
-    """
-    try:
-        from tamilinaiyavaani import SpellChecker
-    except Exception as exc:
-        raise RuntimeError(f"Tamilinaiya/Vaani could not be imported: {exc}") from exc
 
-    tokens = tamil_word_tokens(text)
-    if len(tokens) < 2:
+def tamil_bigrams(value: str):
+    g = tamil_graphemes(value)
+    if len(g) <= 1:
+        return {tuple(g)} if g else set()
+    return {tuple(g[i:i + 2]) for i in range(len(g) - 1)}
+
+
+def grapheme_edit_distance(a: str, b: str):
+    """Levenshtein distance over Tamil grapheme clusters."""
+    aa = tamil_graphemes(a)
+    bb = tamil_graphemes(b)
+    if len(aa) < len(bb):
+        aa, bb = bb, aa
+    if not bb:
+        return len(aa)
+
+    previous = list(range(len(bb) + 1))
+    for i, ca in enumerate(aa, 1):
+        current = [i]
+        for j, cb in enumerate(bb, 1):
+            insert = current[j - 1] + 1
+            delete = previous[j] + 1
+            substitute = previous[j - 1] + (ca != cb)
+            current.append(min(insert, delete, substitute))
+        previous = current
+    return previous[-1]
+
+
+def bigram_dice(a: str, b: str):
+    aa = tamil_bigrams(a)
+    bb = tamil_bigrams(b)
+    if not aa and not bb:
+        return 1.0
+    if not aa or not bb:
+        return 0.0
+    return (2.0 * len(aa & bb)) / (len(aa) + len(bb))
+
+
+def _parse_iyal_word_line(line: str):
+    """
+    Iyal's collection files have evolved over time. Accept common forms:
+      word
+      word count
+      word<TAB>count
+      count word
+    and return (word, frequency).
+    """
+    raw = str(line or "").strip()
+    if not raw or raw.startswith("#"):
+        return None
+
+    parts = re.split(r"\s+", raw)
+    tamil_parts = [p for p in parts if re.search(r"\p{Tamil}", p)]
+    if not tamil_parts:
+        return None
+
+    word = tamil_parts[0].strip()
+    if not re.fullmatch(r"[\p{Tamil}\p{M}\u200c\u200d]+", word):
+        return None
+
+    nums = []
+    for p in parts:
+        try:
+            nums.append(int(p.replace(",", "")))
+        except Exception:
+            pass
+    frequency = max(nums) if nums else 1
+    return unicodedata.normalize("NFC", word), max(1, frequency)
+
+
+def _fetch_iyal_word_resource(url: str, timeout: int = 45):
+    response = httpx.get(
+        url,
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "Themozhi-Tamil-Corpus/0.11.4"},
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def load_iyal_lexicon(force: bool = False):
+    """
+    Load the official Iyal word-bank resources lazily.
+
+    We use Iyal's public high-frequency/manual word lists as the lexical
+    evidence layer. This does not claim to embed the whole Iyal Flask engine.
+    """
+    global _IYAL_WORD_FREQ, _IYAL_LENGTH_INDEX, _IYAL_BIGRAM_INDEX, _IYAL_SOURCE_INFO
+
+    if _IYAL_WORD_FREQ is not None and not force:
+        return _IYAL_WORD_FREQ
+
+    errors = []
+    merged = {}
+    loaded_sources = []
+
+    for url in [IYAL_WORDLIST_URL, IYAL_MANUAL_WORDLIST_URL]:
+        try:
+            payload = _fetch_iyal_word_resource(url)
+            local_count = 0
+            for line in payload.splitlines():
+                parsed = _parse_iyal_word_line(line)
+                if not parsed:
+                    continue
+                word, freq = parsed
+                merged[word] = max(freq, merged.get(word, 0))
+                local_count += 1
+            if local_count:
+                loaded_sources.append({"url": url, "entries": local_count})
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+
+    if not merged:
+        _IYAL_SOURCE_INFO = {
+            "loaded": False,
+            "source": None,
+            "word_count": 0,
+            "error": " | ".join(errors) or "Iyal word bank could not be loaded.",
+        }
+        raise RuntimeError(_IYAL_SOURCE_INFO["error"])
+
+    # Small set of corpus-safe function words / QA terms that should not be
+    # flagged if an upstream resource temporarily omits them. These do not
+    # replace the Iyal resource; they only protect against obvious false flags.
+    safe_words = [
+        "நான்", "நாங்கள்", "என்", "எங்கள்", "அவன்", "அவள்", "அவர்கள்",
+        "பள்ளி", "பள்ளிக்கு", "நண்பன்", "நண்பி", "என்னுடன்", "நேற்று",
+        "இன்று", "மரம்", "மரங்கள்", "தண்ணீர்", "ஆசிரியர்", "வகுப்பறை",
+        "சென்றேன்", "வந்தான்", "வந்தார்கள்", "நட்டேன்", "நட்டோம்",
+        "தோட்டத்தில்", "பூக்கள்", "இருந்தன", "திரும்பினோம்",
+    ]
+    for word in safe_words:
+        merged.setdefault(word, 1)
+
+    length_index = defaultdict(list)
+    bigram_index = defaultdict(set)
+
+    for word in merged:
+        glen = len(tamil_graphemes(word))
+        length_index[glen].append(word)
+        for bg in tamil_bigrams(word):
+            bigram_index[bg].add(word)
+
+    _IYAL_WORD_FREQ = merged
+    _IYAL_LENGTH_INDEX = dict(length_index)
+    _IYAL_BIGRAM_INDEX = dict(bigram_index)
+    _IYAL_SOURCE_INFO = {
+        "loaded": True,
+        "source": loaded_sources,
+        "word_count": len(merged),
+        "error": " | ".join(errors) if errors else None,
+    }
+    return _IYAL_WORD_FREQ
+
+
+def ddspell_rank_suggestions(word: str, limit: int = 5):
+    """
+    DDSpell-style ranking based on the published DDSpell method:
+    character/grapheme bi-gram similarity + minimum edit distance + frequency.
+
+    IMPORTANT: this is an independent implementation of the published method;
+    the original DDSpell source code is not bundled or represented as such.
+    """
+    lexicon = load_iyal_lexicon()
+    if word in lexicon:
         return []
 
+    glen = len(tamil_graphemes(word))
+    if glen <= 1:
+        return []
+
+    q_bigrams = tamil_bigrams(word)
+    candidates = set()
+
+    # DDSpell's published approach uses character bi-gram similarity to narrow
+    # the candidate set. Use Iyal's word bank as the dictionary layer.
+    for bg in q_bigrams:
+        candidates.update((_IYAL_BIGRAM_INDEX or {}).get(bg, ()))
+
+    # Fallback to nearby word lengths if the bigram pool is sparse.
+    if len(candidates) < 25:
+        for ln in range(max(1, glen - 2), glen + 3):
+            candidates.update((_IYAL_LENGTH_INDEX or {}).get(ln, ()))
+
+    scored = []
+    max_distance = 1 if glen <= 4 else 2 if glen <= 8 else 3
+
+    # Limit pathological pools before expensive edit-distance computation.
+    if len(candidates) > 8000:
+        preliminary = sorted(
+            ((bigram_dice(word, c), c) for c in candidates),
+            reverse=True,
+        )[:1200]
+        candidates = {c for _, c in preliminary}
+
+    for cand in candidates:
+        clen = len(tamil_graphemes(cand))
+        if abs(clen - glen) > max_distance:
+            continue
+
+        dice = bigram_dice(word, cand)
+        # Keep a permissive threshold for short Tamil words where a single
+        # grapheme error can alter most bigrams.
+        if dice < (0.18 if glen <= 5 else 0.28):
+            continue
+
+        dist = grapheme_edit_distance(word, cand)
+        if dist > max_distance:
+            continue
+
+        freq = int(lexicon.get(cand, 1))
+        # Lower edit distance dominates, then higher bigram similarity,
+        # then frequency. This follows the DDSpell paper's core signals.
+        scored.append({
+            "word": cand,
+            "edit_distance": dist,
+            "bigram_similarity": round(dice, 4),
+            "frequency": freq,
+        })
+
+    scored.sort(
+        key=lambda x: (
+            x["edit_distance"],
+            -x["bigram_similarity"],
+            -x["frequency"],
+            x["word"],
+        )
+    )
+    return scored[:limit]
+
+
+def detect_errors_iyal_ddspell(text: str):
+    """
+    Tamil lexical layer:
+      - Iyal official word bank decides whether a token is known.
+      - DDSpell-style ranking generates near-word suggestions.
+
+    To reduce false positives in a learner corpus, an unknown token is surfaced
+    only when there is a reasonably strong correction candidate.
+    """
+    lexicon = load_iyal_lexicon()
     out = []
     seen = set()
-    pair_errors = 0
 
-    for i in range(len(tokens) - 1):
-        first = tokens[i]
-        second = tokens[i + 1]
-
-        # Do not send a pair across sentence/phrase punctuation. Ordinary spaces
-        # and line breaks are fine.
-        between = (text or "")[first["end"]:second["start"]]
-        if re.search(r"[.!?;:,।…]", between):
+    for token in tamil_word_tokens(text):
+        word = unicodedata.normalize("NFC", token["text"])
+        if word in lexicon:
             continue
 
-        w1 = first["text"]
-        w2 = second["text"]
-
-        try:
-            result = SpellChecker.REST_interface(w1, w2)
-        except Exception:
-            pair_errors += 1
+        graphemes = tamil_graphemes(word)
+        if len(graphemes) < 2:
             continue
 
-        if not isinstance(result, (tuple, list)) or len(result) < 2:
+        suggestions = ddspell_rank_suggestions(word, limit=5)
+        if not suggestions:
             continue
 
-        flag, suggestions = result[0], result[1]
-        if not isinstance(suggestions, (tuple, list)) or not suggestions:
+        best = suggestions[0]
+        strong = (
+            best["edit_distance"] <= 1
+            or (
+                best["edit_distance"] <= 2
+                and best["bigram_similarity"] >= 0.45
+            )
+        )
+        if not strong:
             continue
 
-        # The documented API returns two suggested words for a two-word input.
-        s1 = str(suggestions[0] if len(suggestions) >= 1 else w1).strip() or w1
-        s2 = str(suggestions[1] if len(suggestions) >= 2 else w2).strip() or w2
-
-        original_norm = normalise_candidate_span(f"{w1} {w2}")
-        suggested_norm = normalise_candidate_span(f"{s1} {s2}")
-
-        if not suggested_norm or suggested_norm == original_norm:
-            continue
-
-        source_start = first["start"]
-        source_end = second["end"]
-        learner_form = (text or "")[source_start:source_end]
-        suggested = f"{s1} {s2}".strip()
-
-        # Use WORD_FORM when Vaani changes a boundary/sandhi form; otherwise
-        # default to SPELLING. Reviewers may change the tag in the UI.
-        changed_count = int(normalise_candidate_span(w1) != normalise_candidate_span(s1))
-        changed_count += int(normalise_candidate_span(w2) != normalise_candidate_span(s2))
-        category = "WORD_FORM" if changed_count >= 1 else "SPELLING"
-
-        key = (normalise_candidate_span(learner_form), normalise_candidate_span(suggested))
+        key = normalise_candidate_span(word)
         if key in seen:
             continue
         seen.add(key)
 
         out.append({
-            "learner_form": learner_form,
-            "category": category,
-            "suggested_correction": suggested,
-            "note": "Tamilinaiya/Vaani Tamil rule/spell-check suggestion. Human verification required.",
-            "engines": ["vaani"],
+            "learner_form": word,
+            "category": "SPELLING",
+            "suggested_correction": best["word"],
+            "note": (
+                "Tamil lexical candidate: word not found in the Iyal word bank; "
+                "suggestion ranked using a DDSpell-style bigram/edit-distance/"
+                "frequency method. Human verification required."
+            ),
+            "engines": ["iyal", "ddspell_style"],
             "agreement": False,
             "engine_meta": {
-                "flag": bool(flag),
-                "pair_index": i,
+                "iyal_known": False,
+                "ddspell_style": True,
+                "alternatives": suggestions,
             },
         })
 
-    # Keep a small diagnostic on the function for the route response without
-    # contaminating annotation objects.
-    detect_errors_vaani.last_pair_errors = pair_errors
     return out
 
 
-detect_errors_vaani.last_pair_errors = 0
+def iyal_runtime_status(load: bool = False):
+    if load:
+        try:
+            load_iyal_lexicon()
+        except Exception:
+            pass
+    return dict(_IYAL_SOURCE_INFO)
+
 
 def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
     api_key = os.getenv("SARVAM_API_KEY")
@@ -1154,16 +1382,60 @@ def normalise_candidate_span(value: str):
     return re.sub(r"[\s\p{P}\p{S}]+", "", normalized)
 
 
+
+def _engine_family(engine: str):
+    # Iyal and DDSpell-style share the same lexical evidence family, so they
+    # should not be counted as two independent confirmations.
+    if engine in {"iyal", "ddspell_style"}:
+        return "lexical"
+    if engine == "rules":
+        return "rules"
+    if engine == "sarvam":
+        return "sarvam"
+    if engine == "gemini":
+        return "gemini"
+    return engine
+
+
+def _candidate_category_priority(category: str, engines):
+    engines = set(engines or [])
+    # Deterministic structural errors should remain deterministic.
+    if "rules" in engines and category in {"PUNCTUATION", "EXTRA_WORD"}:
+        return 100
+    # Tamil lexical specialists have precedence for spelling/word-form.
+    if engines & {"iyal", "ddspell_style"} and category == "SPELLING":
+        return 95
+    if engines & {"iyal", "ddspell_style"} and category == "WORD_FORM":
+        return 90
+    # Contextual categories remain primarily model-supported.
+    if category == "GRAMMAR":
+        return 70
+    if category == "WORD_CHOICE":
+        return 65
+    if category == "WORD_FORM":
+        return 60
+    if category == "SPELLING":
+        return 55
+    return 40
+
+
 def merge_error_candidates(*groups):
     """
-    Merge exact/near-identical spans while preserving engine provenance.
-    Same span + same category from Sarvam and Gemini becomes agreement=True.
+    Merge identical learner spans while preserving all evidence.
+
+    Primary tag selection is evidence-aware:
+      rules -> punctuation/extra-word
+      Iyal/DDSpell-style -> spelling/word-form
+      LLMs -> grammar/context
     """
     merged = []
 
     for group in groups:
         for cand in group:
             span_key = normalise_candidate_span(cand["learner_form"])
+            if not span_key and cand.get("category") != "PUNCTUATION":
+                continue
+
             found = None
             for existing in merged:
                 if normalise_candidate_span(existing["learner_form"]) == span_key:
@@ -1173,8 +1445,21 @@ def merge_error_candidates(*groups):
             if not found:
                 item = dict(cand)
                 item["category_options"] = [cand["category"]]
+                item["evidence"] = [{
+                    "engines": list(cand.get("engines", [])),
+                    "category": cand.get("category"),
+                    "suggested_correction": cand.get("suggested_correction", ""),
+                    "note": cand.get("note", ""),
+                }]
                 merged.append(item)
                 continue
+
+            found.setdefault("evidence", []).append({
+                "engines": list(cand.get("engines", [])),
+                "category": cand.get("category"),
+                "suggested_correction": cand.get("suggested_correction", ""),
+                "note": cand.get("note", ""),
+            })
 
             for engine in cand.get("engines", []):
                 if engine not in found["engines"]:
@@ -1182,45 +1467,55 @@ def merge_error_candidates(*groups):
             if cand["category"] not in found["category_options"]:
                 found["category_options"].append(cand["category"])
 
-            # Prefer a non-empty correction/note if the first engine omitted one.
-            if not found.get("suggested_correction") and cand.get("suggested_correction"):
-                found["suggested_correction"] = cand["suggested_correction"]
-            if not found.get("note") and cand.get("note"):
-                found["note"] = cand["note"]
-
-            found["agreement"] = (
-                len(set(found.get("engines", []))) >= 2
-                and cand["category"] == found["category"]
+            # Specialist correction should replace a contextual guess when the
+            # learner span is the same.
+            old_score = _candidate_category_priority(
+                found.get("category", "OTHER"),
+                found.get("engines", []),
             )
+            new_score = _candidate_category_priority(
+                cand.get("category", "OTHER"),
+                cand.get("engines", []),
+            )
+            if new_score > old_score:
+                found["category"] = cand["category"]
+                if cand.get("suggested_correction"):
+                    found["suggested_correction"] = cand["suggested_correction"]
+                if cand.get("note"):
+                    found["note"] = cand["note"]
+            elif not found.get("suggested_correction") and cand.get("suggested_correction"):
+                found["suggested_correction"] = cand["suggested_correction"]
 
     for item in merged:
+        families = {
+            _engine_family(engine)
+            for engine in item.get("engines", [])
+            if engine
+        }
+        item["evidence_families"] = sorted(families)
         item["agreement"] = bool(
-            len(set(item.get("engines", []))) >= 2
+            len(families) >= 2
             and len(item.get("category_options", [])) == 1
         )
+
     return merged
 
-
-
-def vaani_runtime_status():
-    try:
-        from tamilinaiyavaani import SpellChecker  # noqa: F401
-        return {"importable": True, "error": None}
-    except Exception as exc:
-        return {"importable": False, "error": str(exc)}
 
 
 @app.get("/health")
 def health():
     return {
         "ok": True,
-        "version": "0.11.3.1",
+        "version": "0.11.4",
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
         "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
-        "vaani_detector": "tamilinayavaani 0.14",
-        "vaani_runtime": vaani_runtime_status(),
-        "error_detection": "Tamilinaiya/Vaani + Sarvam + Gemini + deterministic rules",
+        "iyal_lexicon": {
+            "source": "KaniyamFoundation Iyal official word-bank resources",
+            "status": iyal_runtime_status(load=False),
+        },
+        "ddspell_layer": "published-method reimplementation (bigram + edit distance + frequency)",
+        "error_detection": "Iyal lexical evidence + DDSpell-style ranking + Sarvam + Gemini + deterministic rules",
     }
 
 
@@ -1239,15 +1534,24 @@ async def detect_errors(payload: dict = Body(...)):
     rules = detect_rule_candidates(text)
 
     try:
-        vaani = detect_errors_vaani(text)
-        engines["vaani"] = {
+        lexical = detect_errors_iyal_ddspell(text)
+        iyal_status = iyal_runtime_status(load=False)
+        engines["iyal"] = {
             "ok": True,
-            "count": len(vaani),
-            "pair_errors": int(getattr(detect_errors_vaani, "last_pair_errors", 0)),
+            "count": len(lexical),
+            "word_bank_size": iyal_status.get("word_count", 0),
+            "source": iyal_status.get("source"),
+            "warning": iyal_status.get("error"),
+        }
+        engines["ddspell_style"] = {
+            "ok": True,
+            "count": len(lexical),
+            "implementation": "published DDSpell method; original source not bundled",
         }
     except Exception as exc:
-        vaani = []
-        engines["vaani"] = {"ok": False, "error": str(exc)}
+        lexical = []
+        engines["iyal"] = {"ok": False, "error": str(exc)}
+        engines["ddspell_style"] = {"ok": False, "error": str(exc)}
 
     try:
         sarvam = detect_errors_sarvam(text, level, task)
@@ -1264,7 +1568,7 @@ async def detect_errors(payload: dict = Body(...)):
         engines["gemini"] = {"ok": False, "error": str(exc)}
 
     engines["rules"] = {"ok": True, "count": len(rules)}
-    candidates = merge_error_candidates(vaani, sarvam, gemini, rules)
+    candidates = merge_error_candidates(lexical, sarvam, gemini, rules)
 
     return {
         "categories": ERROR_CATEGORIES,

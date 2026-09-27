@@ -1,11 +1,28 @@
-# Third-party notice
+# Third-party / research notice
 
-## tamilinayavaani
+## Iyal Tamil Spellchecker resources
 
-Tamilinaiya/Vaani Python spell-checking component.
+This prototype uses the public word-bank resources from the Kaniyam Foundation
+Iyal Tamil Spellchecker project as Tamil lexical evidence.
 
-- Upstream: Tamil-Virtual-Academy / Tamilinaiya-Spellchecker and Python port maintained in the Tamil open-source ecosystem.
-- Package: `tamilinayavaani` 0.14
-- License reported by upstream/PyPI: GNU GPL v2.
-- Used in this prototype only as a server-side candidate detector.
-- Automatic suggestions are not applied without human review.
+Project:
+https://github.com/KaniyamFoundation/iyal-tamil-spellchecker
+
+The Iyal public site states that the project is released under the Apache
+License 2.0. Preserve upstream attribution and review the repository's current
+license terms before production redistribution.
+
+## DDSpell
+
+Reference:
+Uthayamoorthy, K.; Kanthasamy, K.; Senthaalan, T.; Sarveswaran, K.; Dias, G.
+"DDSpell - A Data Driven Spell Checker and Suggestion Generator for the Tamil
+Language", ICTer 2019.
+
+v0.11.4 does NOT bundle or claim to run the original DDSpell source code.
+It implements the published core ranking signals (bigram similarity, minimum
+edit distance and word frequency) and labels the result `ddspell_style`.
+
+## Sarvam / Google Gemini
+
+Used through their respective hosted APIs. API credentials remain server-side.

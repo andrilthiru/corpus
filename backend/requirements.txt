@@ -14,5 +14,3 @@ google-cloud-vision>=3.10
 
 google-genai>=1.0
 
-# Tamil-specific rule/spell checker (Tamil Virtual Academy / Vaani Python port)
-tamilinayavaani==0.14
