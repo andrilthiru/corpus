@@ -16,19 +16,19 @@
 /* ---------- tunable exception rules ---------- */
 const EXCEPTION_RULES = {
   googleLowWordConfidence: 0.80,     // a Google word below this becomes a word-level issue
-  maxWordIssuesBeforeLineIssue: 4,   // more disagreements than this → one whole-line issue
-  maxChangedShareBeforeLineIssue: 0.5,
+  weakLineWordConfidence: 0.90,      // on a hard-to-read line, words below this are flagged individually
   nonLearnerLatinShare: 0.5,         // ≥ this share of Latin letters → "possible non-learner text"
   nonLearnerBlockTypes: ["header", "footer", "page-header", "page-footer", "page_header", "page_footer",
                          "page-number", "page_number", "footnote", "caption"],
-  weakLineVisualScore: 50            // legibility below this with no word issue → whole-line issue
+  weakLineVisualScore: 50            // legibility below this marks the line as hard to read
 };
 
 const ISSUE_KINDS = {
   DISAGREE:       { label: "OCR engines disagree", actions: ["optionA", "optionB", "edit"] },
-  DISAGREE_LINE:  { label: "OCR engines disagree (whole line)", actions: ["optionA", "optionB", "edit"] },
   LOW_CONF:       { label: "OCR uncertainty", actions: ["accept", "edit"] },
-  LINE_UNCERTAIN: { label: "Low OCR / image confidence", actions: ["accept", "edit"] },
+  WEAK_WORD:      { label: "Hard-to-read line · least certain word", actions: ["accept", "edit"] },
+  LINE_UNCERTAIN: { label: "No second OCR reading · check line", actions: ["accept", "edit"] },
+  DISAGREE_LINE:  { label: "OCR engines disagree (whole line)", actions: ["optionA", "optionB", "edit"] },   // legacy drafts only
   NON_LEARNER:    { label: "Possible non-learner text", actions: ["exclude", "keep"] }
 };
 
@@ -129,35 +129,34 @@ function buildLineIssues(line) {
         const b = B.slice(op[3], op[4]).map((t) => s3cmp(t.text)).join("");
         return a !== b;
       });
-    const changed = ops.reduce((k, op) => k + Math.max(op[2] - op[1], op[4] - op[3]), 0);
-    if (ops.length > EXCEPTION_RULES.maxWordIssuesBeforeLineIssue ||
-        changed / Math.max(1, A.length) > EXCEPTION_RULES.maxChangedShareBeforeLineIssue) {
-      add("DISAGREE_LINE", 0, text.length, {
-        options: [{ key: "optionA", engine: line?.primary_ocr?.engine || "sarvam", text },
-                  { key: "optionB", engine: line?.secondary_ocr?.engine || "google", text: bRaw }],
-        bbox: unionBbox(B.map((w) => w.bbox))
-      });
-    } else {
-      for (const [tag, i1, i2, j1, j2] of ops) {
-        let s, e, aText, bText;
-        const bWords = B.slice(j1, j2);
-        if (i2 > i1) {
-          s = A[i1].start; e = A[i2 - 1].end;
-          aText = text.slice(s, e);
-          bText = bWords.map((w) => w.text).join(" ");
-        } else {
-          // Google has extra word(s) that Sarvam lacks → attach to the neighbouring token
-          const k = Math.min(i1, A.length - 1);
-          if (k < 0) continue;
-          s = A[k].start; e = A[k].end; aText = A[k].text;
-          bText = i1 < A.length ? `${bWords.map((w) => w.text).join(" ")} ${A[k].text}` : `${A[k].text} ${bWords.map((w) => w.text).join(" ")}`;
-        }
-        add("DISAGREE", s, e, {
-          options: [{ key: "optionA", engine: line?.primary_ocr?.engine || "sarvam", text: aText },
-                    { key: "optionB", engine: line?.secondary_ocr?.engine || "google", text: bText }],
-          bbox: unionBbox(bWords.map((w) => w.bbox))
-        });
+    // adjacent mismatches with the same word count on both sides → one item per word
+    const perWord = ops.flatMap((op) => {
+      const [tag, i1, i2, j1, j2] = op;
+      if (tag === "replace" && i2 - i1 === j2 - j1 && i2 - i1 > 1) {
+        return Array.from({ length: i2 - i1 }, (_, k) => ["replace", i1 + k, i1 + k + 1, j1 + k, j1 + k + 1])
+          .filter(([, a1, a2, b1, b2]) => s3cmp(A[a1].text) !== s3cmp(B[b1].text));
       }
+      return [op];
+    });
+    for (const [tag, i1, i2, j1, j2] of perWord) {
+      let s, e, aText, bText;
+      const bWords = B.slice(j1, j2);
+      if (i2 > i1) {
+        s = A[i1].start; e = A[i2 - 1].end;
+        aText = text.slice(s, e);
+        bText = bWords.map((w) => w.text).join(" ");
+      } else {
+        // Google has extra word(s) that Sarvam lacks → attach to the neighbouring token
+        const k = Math.min(i1, A.length - 1);
+        if (k < 0) continue;
+        s = A[k].start; e = A[k].end; aText = A[k].text;
+        bText = i1 < A.length ? `${bWords.map((w) => w.text).join(" ")} ${A[k].text}` : `${A[k].text} ${bWords.map((w) => w.text).join(" ")}`;
+      }
+      add("DISAGREE", s, e, {
+        options: [{ key: "optionA", engine: line?.primary_ocr?.engine || "sarvam", text: aText },
+                  { key: "optionB", engine: line?.secondary_ocr?.engine || "google", text: bText }],
+        bbox: unionBbox(bWords.map((w) => w.bbox))
+      });
     }
   }
 
@@ -169,8 +168,18 @@ function buildLineIssues(line) {
     if (tok) add("LOW_CONF", tok.start, tok.end, { bbox: w.bbox, confidence: w.confidence });
   });
 
-  // 3. weak line evidence with no specific word to point at
-  if (!issues.length && isWeakLine(line)) add("LINE_UNCERTAIN", 0, text.length);
+  // 3. hard-to-read line with no word flagged yet → flag its least certain word(s), still word-level
+  if (!issues.length && isWeakLine(line)) {
+    const scored = gWords.filter((w) => typeof w.confidence === "number")
+      .map((w) => ({ w, tok: A.find((t) => s3cmp(t.text) === s3cmp(w.text) && !covered(t.start, t.end)) }))
+      .filter((x) => x.tok)
+      .sort((a, b) => a.w.confidence - b.w.confidence);
+    const weak = scored.filter((x) => x.w.confidence < EXCEPTION_RULES.weakLineWordConfidence);
+    (weak.length ? weak : scored.slice(0, 1)).forEach(({ w, tok }) =>
+      add("WEAK_WORD", tok.start, tok.end, { bbox: w.bbox, confidence: w.confidence }));
+    // no second reading at all: nothing to point at, so the line is checked as a whole
+    if (!issues.length) add("LINE_UNCERTAIN", 0, text.length);
+  }
 
   return issues;
 }

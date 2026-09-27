@@ -3,31 +3,29 @@
    Original learner text | Corrected / annotated text + cards.
    One card per underlying error (overlapping detector spans are
    merged, all evidence kept). Tamil taxonomy is shared with
-   automatic suggestions (taxonomy.js). Language FEATURES such as
-   proverbs are tagged separately from errors.
+   automatic suggestions (taxonomy.js).
 
    Relies on app.js globals: $, escapeHtml, normalizeTamilText,
    errorCandidates, draftAnnotations, scheduleDraftAutosave,
    consolidatedVerifiedText.
    ========================================================= */
 
-let annotationItems = [];          // unified review list (errors + features)
+let annotationItems = [];          // unified review list of error cards
 let annotationFilter = "all";      // all | pending | accepted | rejected
 let activeAnnotationId = null;
 let previewPendingCorrections = false;
 let annotationItemSeq = 0;
 
 const ENGINE_LABELS = { iyal: "Iyal", ddspell_style: "DDSpell-style", sarvam: "Sarvam", gemini: "Gemini",
-                        rules: "Rules", manual: "Manual", lexicon: "Feature lexicon", script: "Script check" };
+                        rules: "Rules", manual: "Manual" };
 
 function annotationText() {
   return normalizeTamilText(consolidatedVerifiedText() || $("verifiedText").value || "");
 }
 function newItemId() { annotationItemSeq += 1; return `A${Date.now().toString(36)}${annotationItemSeq}`; }
-function isFeature(item) { return item.kind === "feature"; }
-function itemGroup(item) { return isFeature(item) ? "FEATURE" : (subtypeGroup(item.subtype) || "NONE"); }
+function itemGroup(item) { return subtypeGroup(item.subtype) || "NONE"; }
 function itemTypeLabel(item) {
-  return isFeature(item) ? (FEATURE_TYPES[item.feature]?.ta || "கூறு") : subtypeLabel(item.subtype);
+  return subtypeLabel(item.subtype);
 }
 
 /* ---------- locating spans in the verified text ---------- */
@@ -98,40 +96,6 @@ function mergeOverlappingItems(items, text) {
   return merged.concat(unlocated);
 }
 
-/* ---------- automatic FEATURE suggestions (proverbs, quotations, code-mixing) ---------- */
-function featureKey(s) {
-  // compare ignoring spaces/punctuation and word-final ஒற்று (க்/ச்/த்/ப்) so "காலைப் போல" ≈ "காலை போல"
-  return normalizeTamilText(s).split(/\s+/).map((w) => w.replace(/[^\p{L}\p{M}]/gu, "").replace(/[கசதப]்$/, "")).join("");
-}
-function detectFeatureSuggestions(text) {
-  const out = [];
-  // map a compacted text back to original offsets
-  const words = [...text.matchAll(/\S+/g)].map((m) => ({ w: m[0], s: m.index, e: m.index + m[0].length }));
-  const keys = words.map((x) => featureKey(x.w));
-  PROVERB_SEED.forEach(({ text: prov, type }) => {
-    const pk = featureKey(prov);
-    const n = prov.split(/\s+/).length;
-    for (let i = 0; i + n <= words.length; i++) {
-      for (const len of [n - 1, n, n + 1]) {                  // tolerate one split/merged word
-        if (len < 1 || i + len > words.length) continue;
-        if (keys.slice(i, i + len).join("") === pk) {
-          out.push({ id: newItemId(), kind: "feature", feature: type, status: "pending", origin: null,
-                     start: words[i].s, end: words[i + len - 1].e, text: text.slice(words[i].s, words[i + len - 1].e),
-                     suggested: "", note: `Matches: ${prov}`, sources: ["lexicon"], evidence: [] });
-          i += len - 1;
-          break;
-        }
-      }
-    }
-  });
-  for (const m of text.matchAll(/[A-Za-z][A-Za-z'’-]*(?:\s+[A-Za-z][A-Za-z'’-]*)*/g)) {
-    out.push({ id: newItemId(), kind: "feature", feature: "CODE_MIX", status: "pending", origin: null,
-               start: m.index, end: m.index + m[0].length, text: m[0], suggested: "",
-               note: "Latin-script word(s) in Tamil text", sources: ["script"], evidence: [] });
-  }
-  return out;
-}
-
 /* ---------- state sync with app.js ---------- */
 function toAnnotationRecord(item) {
   const group = itemGroup(item);
@@ -140,14 +104,12 @@ function toAnnotationRecord(item) {
     text: item.text,
     start: item.start, end: item.end,
     suggested: item.suggested || "",
-    category: isFeature(item) ? "FEATURE" : (SUBTYPE_TO_LEGACY[item.subtype] || "OTHER"),   // legacy field (dashboard)
-    subtype: isFeature(item) ? null : item.subtype,
-    subtype_ta: isFeature(item) ? null : TAMIL_SUBTYPES[item.subtype]?.ta,
-    feature: isFeature(item) ? item.feature : null,
-    feature_ta: isFeature(item) ? FEATURE_TYPES[item.feature]?.ta : null,
-    group: isFeature(item) ? null : group,
-    group_ta: isFeature(item) ? null : groupInfo(group)?.ta,
-    origin: item.origin || (isFeature(item) ? null : "learner_error"),
+    category: SUBTYPE_TO_LEGACY[item.subtype] || "OTHER",   // legacy field (dashboard)
+    subtype: item.subtype,
+    subtype_ta: TAMIL_SUBTYPES[item.subtype]?.ta,
+    group,
+    group_ta: groupInfo(group)?.ta,
+    origin: item.origin || "learner_error",
     auto_subtype: item.auto_subtype || null,
     note: item.note || "",
     source: item.sources.join("+") || "manual",
@@ -188,7 +150,7 @@ function renderOriginalText(text) {
   return html + escapeHtml(text.slice(pos));
 }
 function renderCorrectedText(text) {
-  const apply = annotationItems.filter((i) => !isFeature(i) && i.start != null && i.suggested != null &&
+  const apply = annotationItems.filter((i) => i.start != null && i.suggested != null &&
     (i.status === "accepted" || (previewPendingCorrections && i.status === "pending")))
     .sort((a, b) => a.start - b.start);
   let html = "", pos = 0;
@@ -218,9 +180,7 @@ function cardHtml(item, n) {
   const g = itemGroup(item);
   const active = item.id === activeAnnotationId;
   const statusLabel = { pending: "Pending", accepted: "Accepted", rejected: item.origin === "ocr_error" ? "Rejected · OCR error" : "Rejected · not an error" }[item.status];
-  const typeSelect = isFeature(item)
-    ? `<select data-a-type>${taxonomyOptionsHtml("FEAT:" + item.feature, { includeFeatures: true })}</select>`
-    : `<select data-a-type>${taxonomyOptionsHtml(item.subtype, { includeFeatures: true })}</select>`;
+  const typeSelect = `<select data-a-type>${taxonomyOptionsHtml(item.subtype)}</select>`;
   const occ = item.occurrences?.length > 1
     ? `<span class="small a-occ">occurrence ${item.occurrences.findIndex(([s]) => s === item.start) + 1} of ${item.occurrences.length}
          <button type="button" class="text-button" data-a-next-occ>next ›</button></span>` : "";
@@ -228,7 +188,7 @@ function cardHtml(item, n) {
     <div class="a-card-head">
       <span class="a-num">${n}</span>
       <span class="tamil a-orig">${escapeHtml(item.text) || "<em>(insertion)</em>"}</span>
-      ${isFeature(item) ? "" : `<span class="a-arrow">→</span><input class="tamil a-sugg" data-a-sugg value="${escapeHtml(item.suggested || "")}" placeholder="correction" />`}
+      ${`<span class="a-arrow">→</span><input class="tamil a-sugg" data-a-sugg value="${escapeHtml(item.suggested || "")}" placeholder="correction" />`}
       <span class="a-status">${statusLabel}</span>
     </div>
     <div class="a-card-meta">
@@ -236,16 +196,15 @@ function cardHtml(item, n) {
     </div>
     <div class="small a-prov">${item.sources.map((s) => `<span class="a-chip">${escapeHtml(ENGINE_LABELS[s] || s)}</span>`).join("")}
       ${item.agreement ? '<span class="a-chip agree">independent agreement</span>' : ""}
-      ${item.auto_subtype && item.auto_subtype !== item.subtype && !isFeature(item) ? `<span class="a-chip">auto: ${escapeHtml(subtypeLabel(item.auto_subtype))}</span>` : ""}
+      ${item.auto_subtype && item.auto_subtype !== item.subtype ? `<span class="a-chip">auto: ${escapeHtml(subtypeLabel(item.auto_subtype))}</span>` : ""}
       ${item.start == null ? '<span class="a-chip warn">not found in text</span>' : ""} ${occ}</div>
     ${active ? `${item.note ? `<div class="small a-note">${escapeHtml(item.note)}</div>` : ""}
       <label class="small a-note-edit hidden">Note <input data-a-note value="${escapeHtml(item.note || "")}" /></label>
       ${evidenceHtml(item)}` : ""}
     <div class="a-actions">
-      <button type="button" class="primary-btn" data-a-accept>${isFeature(item) ? "Confirm" : "Accept"}</button>
+      <button type="button" class="primary-btn" data-a-accept>Accept</button>
       <button type="button" data-a-edit>Edit</button>
-      ${isFeature(item) ? '<button type="button" data-a-reject="not_error">Reject</button>' :
-        `<span class="a-reject-group"><button type="button" data-a-reject="not_error" title="The learner's form is correct">Not an error</button><button type="button" data-a-reject="ocr_error" title="Transcription mistake — fix it in Stage 3">OCR error</button></span>`}
+      ${`<span class="a-reject-group"><button type="button" data-a-reject="not_error" title="The learner's form is correct">Not an error</button><button type="button" data-a-reject="ocr_error" title="Transcription mistake — fix it in Stage 3">OCR error</button></span>`}
       ${item.status !== "pending" ? '<button type="button" class="text-button" data-a-undo>Undo</button>' : ""}
     </div>
   </article>`;
@@ -272,8 +231,7 @@ function renderAnnotationCards() {
     card.addEventListener("click", (ev) => { if (!ev.target.closest("button, input, select, summary, a")) selectAnnotation(item.id); });
     const read = () => {
       const t = card.querySelector("[data-a-type]")?.value || "";
-      if (t.startsWith("FEAT:")) { item.kind = "feature"; item.feature = t.slice(5); }
-      else if (t) { item.kind = "error"; item.subtype = t; }
+      if (t) item.subtype = t;
       const sg = card.querySelector("[data-a-sugg]");
       if (sg) item.suggested = sg.value.trim();
       const nt = card.querySelector("[data-a-note]");
@@ -282,7 +240,7 @@ function renderAnnotationCards() {
     card.querySelector("[data-a-type]")?.addEventListener("change", () => { read(); afterAnnotationChange(); });
     card.querySelector("[data-a-sugg]")?.addEventListener("change", () => { read(); afterAnnotationChange(false); });
     card.querySelector("[data-a-accept]").addEventListener("click", () => {
-      read(); item.status = "accepted"; item.origin = isFeature(item) ? null : "learner_error";
+      read(); item.status = "accepted"; item.origin = "learner_error";
       afterAnnotationChange(); selectNextPending(item.id);
     });
     card.querySelectorAll("[data-a-reject]").forEach((b) => b.addEventListener("click", () => {
@@ -323,11 +281,10 @@ function renderAnnotationWorkspace() {
   renderAnnotationTexts();
   renderAnnotationCards();
   syncDraftAnnotations();
-  const errs = annotationItems.filter((i) => !isFeature(i));
-  const feats = annotationItems.filter(isFeature);
+  const accepted = annotationItems.filter((i) => i.status === "accepted").length;
   const pend = annotationItems.filter((i) => i.status === "pending").length;
   $("annotationStatus").textContent = annotationItems.length
-    ? `${errs.filter((i) => i.status === "accepted").length} errors · ${feats.filter((i) => i.status === "accepted").length} features accepted · ${pend} pending`
+    ? `${accepted} accepted · ${pend} pending`
     : "Ready for review";
 }
 function renderErrorCandidates() { renderAnnotationWorkspace(); }   // legacy name used by app.js
@@ -338,7 +295,7 @@ function afterAnnotationChange(rerenderCards = true) {
   renderAnnotationTexts();
   if (rerenderCards) renderAnnotationCards();
   const pend = annotationItems.filter((i) => i.status === "pending").length;
-  $("annotationStatus").textContent = `${draftAnnotations.filter((a) => a.kind !== "feature").length} errors · ${draftAnnotations.filter((a) => a.kind === "feature").length} features accepted · ${pend} pending`;
+  $("annotationStatus").textContent = `${draftAnnotations.length} accepted · ${pend} pending`;
   scheduleDraftAutosave();
 }
 function selectAnnotation(id, { fromText = false } = {}) {
@@ -389,13 +346,13 @@ function showSelectionTools() {
   tools.style.top = `${off.rect.bottom - host.top + 6}px`;
   tools.classList.remove("hidden");
 }
-function addManualItem(kind) {
+function addManualItem(kind = "error") {
   const tools = $("s4SelectionTools");
   const start = Number(tools.dataset.start), end = Number(tools.dataset.end);
   const text = annotationText();
   const item = { id: newItemId(), kind, status: "pending", origin: null, start, end,
-    occurrences: [[start, end]], text: text.slice(start, end), suggested: kind === "error" ? text.slice(start, end) : "",
-    subtype: kind === "error" ? "EZ_GEN" : null, feature: kind === "feature" ? "PROVERB" : null,
+    occurrences: [[start, end]], text: text.slice(start, end), suggested: text.slice(start, end),
+    subtype: "EZ_GEN",
     note: "", sources: ["manual"], evidence: [] };
   annotationItems.push(item);
   tools.classList.add("hidden");
@@ -433,13 +390,12 @@ async function runErrorDetection() {
 
     errorCandidates = Array.isArray(payload?.candidates) ? payload.candidates.map((c) => ({ ...c, review_status: "PENDING" })) : [];
     const keep = annotationItems.filter((i) => i.status !== "pending" || i.sources.includes("manual"));
-    const fresh = itemsFromCandidates(errorCandidates, text).concat(detectFeatureSuggestions(text))
+    const fresh = itemsFromCandidates(errorCandidates, text)
       .filter((n) => !keep.some((k) => k.start != null && n.start != null && n.start < k.end && n.end > k.start && k.kind === n.kind));
     annotationItems = keep.concat(fresh);
 
     const engineText = Object.entries(payload?.engines || {}).map(([n, info]) => `${ENGINE_LABELS[n] || n}: ${info.ok ? "ok" : "unavailable"}`).join(" · ");
-    const errorsN = fresh.filter((i) => !isFeature(i)).length, featN = fresh.filter(isFeature).length;
-    $("errorDetectionStatus").textContent = `${errorCandidates.length} detector result(s) → ${errorsN} error card(s), ${featN} feature suggestion(s) · ${engineText}`;
+    $("errorDetectionStatus").textContent = `${errorCandidates.length} detector result(s) → ${fresh.length} error card(s) · ${engineText}`;
     const failures = Object.entries(payload?.engines || {}).filter(([, i]) => !i?.ok).map(([n, i]) => `${n}: ${i?.error || "unavailable"}`);
     let diag = $("engineDiagnostics");
     if (!diag) { diag = document.createElement("div"); diag.id = "engineDiagnostics"; diag.className = "engine-diagnostics small"; $("errorDetectionStatus").insertAdjacentElement("afterend", diag); }
@@ -458,14 +414,6 @@ async function runErrorDetection() {
   }
 }
 
-function runFeatureScanOnly() {
-  const text = annotationText();
-  const fresh = detectFeatureSuggestions(text).filter((n) => !annotationItems.some((k) => isFeature(k) && k.start === n.start && k.end === n.end));
-  annotationItems = annotationItems.concat(fresh);
-  afterAnnotationChange();
-  $("errorDetectionStatus").textContent = `${fresh.length} new feature suggestion(s) from the proverb/quotation list and script check.`;
-}
-
 function wireStage4() {
   document.querySelectorAll("[data-a-filter]").forEach((b) => b.addEventListener("click", () => {
     annotationFilter = b.dataset.aFilter; renderAnnotationCards();
@@ -477,6 +425,4 @@ function wireStage4() {
     if (!ev.target.closest("#s4SelectionTools, #s4Original")) $("s4SelectionTools")?.classList.add("hidden");
   });
   $("s4AddError")?.addEventListener("click", () => addManualItem("error"));
-  $("s4AddFeature")?.addEventListener("click", () => addManualItem("feature"));
-  $("s4FeatureScan")?.addEventListener("click", runFeatureScanOnly);
 }

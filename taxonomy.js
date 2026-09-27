@@ -38,17 +38,6 @@ const TAMIL_SUBTYPES = {
   SPACE:    { ta: "இடைவெளிப் பிழை", en: "Spacing", group: "NADAI" }
 };
 
-/* Language FEATURES — not errors. Tagged for analysis (e.g. proverb use by level). */
-const FEATURE_TYPES = {
-  PROVERB:    { ta: "பழமொழி", en: "Proverb" },
-  IDIOM:      { ta: "மரபுத்தொடர்", en: "Idiom" },
-  QUOTATION:  { ta: "மேற்கோள் (திருக்குறள் முதலியன)", en: "Quotation (Thirukkural etc.)" },
-  FIGURATIVE: { ta: "உவமை / உருவகம்", en: "Simile / metaphor" },
-  CONNECTIVE: { ta: "இணைப்புச் சொல்", en: "Discourse connective" },
-  CODE_MIX:   { ta: "பிறமொழிக் கலப்பு", en: "Code-mixing (English etc.)" },
-  COLLOQUIAL: { ta: "பேச்சு வழக்கு", en: "Colloquial form" }
-};
-
 /* Legacy backend categories → default Tamil subtype (refined from the correction when possible). */
 const LEGACY_TO_SUBTYPE = {
   SPELLING: "EZ_GEN", GRAMMAR: "GRAM_GEN", PUNCTUATION: "PUNCT", WORD_CHOICE: "WCHOICE",
@@ -73,20 +62,14 @@ function subtypeLabel(code) {
   return s ? `${s.ta}` : "வகைப்படுத்தப்படவில்லை";
 }
 
-/* <select> options grouped by the four top-level groups (+ features when asked). */
-function taxonomyOptionsHtml(selected = "", { includeFeatures = false } = {}) {
+/* <select> options grouped by the four top-level groups. */
+function taxonomyOptionsHtml(selected = "") {
   const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   let html = TAMIL_GROUPS.map((g) => `
     <optgroup label="${esc(g.ta)} · ${esc(g.en)}">
       ${Object.entries(TAMIL_SUBTYPES).filter(([, s]) => s.group === g.id).map(([code, s]) =>
         `<option value="${code}" ${code === selected ? "selected" : ""}>${esc(s.ta)} — ${esc(s.en)}</option>`).join("")}
     </optgroup>`).join("");
-  if (includeFeatures) {
-    html += `<optgroup label="மொழிக் கூறுகள் · Language features (not errors)">
-      ${Object.entries(FEATURE_TYPES).map(([code, f]) =>
-        `<option value="FEAT:${code}" ${("FEAT:" + code) === selected ? "selected" : ""}>${esc(f.ta)} — ${esc(f.en)}</option>`).join("")}
-    </optgroup>`;
-  }
   return html;
 }
 
@@ -223,19 +206,3 @@ function inferSubtype(candidate) {
   if (["GRAMMAR", "WORD_FORM"].includes(legacy) && ["PGN", "SV_AGR", "TENSE", "NUMBER", "CASE", "ORDER", "CONSTR"].includes(fromDiff)) return fromDiff;
   return base;
 }
-
-/* ---------- Seed proverb list for automatic FEATURE suggestions ----------
-   A starter list only — replace/extend with a vetted list (e.g. from your teachers or a
-   published பழமொழி collection). Matching ignores spacing, punctuation and word-final ஒற்று. */
-const PROVERB_SEED = [
-  { text: "சிறு துளி பெரு வெள்ளம்", type: "PROVERB" },
-  { text: "கற்றது கைமண் அளவு கல்லாதது உலகளவு", type: "PROVERB" },
-  { text: "ஆழம் தெரியாமல் காலை விடாதே", type: "PROVERB" },
-  { text: "அகத்தின் அழகு முகத்தில் தெரியும்", type: "PROVERB" },
-  { text: "தாயைப் போல பிள்ளை நூலைப் போல சேலை", type: "PROVERB" },
-  { text: "காலம் பொன் போன்றது", type: "PROVERB" },
-  { text: "ஒற்றுமையே பலம்", type: "PROVERB" },
-  { text: "முயற்சி திருவினையாக்கும்", type: "QUOTATION" },
-  { text: "யாதும் ஊரே யாவரும் கேளிர்", type: "QUOTATION" },
-  { text: "அன்னையும் பிதாவும் முன்னறி தெய்வம்", type: "QUOTATION" }
-];

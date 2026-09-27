@@ -1267,7 +1267,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
    v0.12 — Wide workspace, Stage 3 three-panel review,
    Stage 4 annotation workspace.
    Colour system: four Tamil error groups + one neutral for
-   language features; status is shown with neutral treatments
    (dashed = pending, fill = accepted, strike = rejected).
    ========================================================= */
 :root {
@@ -1275,7 +1274,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   --g-sol: #2f6aa8;       --g-sol-bg: #e5eefa;
   --g-ilakkanam: #b04a5a; --g-ilakkanam-bg: #f9e6e9;
   --g-nadai: #2f7d58;     --g-nadai-bg: #e2f3ea;
-  --g-feature: #5b6474;   --g-feature-bg: #eef0f4;
   --st-open: #d48a0c;     --st-open-bg: #fff1d6;
   --st-ok: #6b7280;
   --panel-h: max(520px, calc(100vh - 150px));
@@ -1414,7 +1412,6 @@ mark.t-issue.active { outline: 2px solid var(--g-sol); outline-offset: 1px; }
 .lg.g-sol { background: var(--g-sol-bg); color: var(--g-sol); }
 .lg.g-ilakkanam { background: var(--g-ilakkanam-bg); color: var(--g-ilakkanam); }
 .lg.g-nadai { background: var(--g-nadai-bg); color: var(--g-nadai); }
-.lg.g-feature { background: var(--g-feature-bg); color: var(--g-feature); }
 .lg.s-pending { border: 1px dashed var(--st-ok); color: var(--st-ok); }
 .lg.s-accepted { background: #e5e7eb; color: var(--text); }
 
@@ -1423,10 +1420,8 @@ mark.a-mark.g-ezhuthu { --c: var(--g-ezhuthu); --bg: var(--g-ezhuthu-bg); }
 mark.a-mark.g-sol { --c: var(--g-sol); --bg: var(--g-sol-bg); }
 mark.a-mark.g-ilakkanam { --c: var(--g-ilakkanam); --bg: var(--g-ilakkanam-bg); }
 mark.a-mark.g-nadai { --c: var(--g-nadai); --bg: var(--g-nadai-bg); }
-mark.a-mark.g-feature { --c: var(--g-feature); --bg: var(--g-feature-bg); }
 mark.a-mark.s-pending { box-shadow: inset 0 -2px 0 var(--c); background-image: linear-gradient(transparent 60%, color-mix(in srgb, var(--bg) 70%, transparent) 60%); }
 mark.a-mark.s-accepted { background: var(--bg); box-shadow: inset 0 -2px 0 var(--c); }
-mark.a-mark.g-feature.s-pending { box-shadow: none; border-bottom: 2px dotted var(--c); }
 mark.a-mark.active { outline: 2px solid var(--c); outline-offset: 1px; }
 mark.a-mark.corrected.s-pending { opacity: .75; }
 
@@ -1442,7 +1437,6 @@ mark.a-mark.corrected.s-pending { opacity: .75; }
 .a-card.g-sol { --c: var(--g-sol); }
 .a-card.g-ilakkanam { --c: var(--g-ilakkanam); }
 .a-card.g-nadai { --c: var(--g-nadai); }
-.a-card.g-feature { --c: var(--g-feature); border-left-style: dashed; }
 .a-card.active { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 25%, transparent); cursor: default; }
 .a-card.s-rejected { opacity: .6; }
 .a-card.s-rejected .a-orig { text-decoration: line-through; }
