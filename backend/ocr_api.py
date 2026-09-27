@@ -25,7 +25,7 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.2.3")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.3")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -884,6 +884,119 @@ def detect_rule_candidates(text: str):
     return out
 
 
+
+def tamil_word_tokens(text: str):
+    """
+    Extract Tamil word tokens with source offsets. We preserve the exact learner
+    span in candidate annotations, while giving Tamilinaiya/Vaani adjacent words
+    as its REST_interface expects.
+    """
+    pattern = re.compile(r"[\p{Tamil}][\p{Tamil}\p{M}\u200c\u200d]*")
+    return [
+        {
+            "text": m.group(0),
+            "start": m.start(),
+            "end": m.end(),
+        }
+        for m in pattern.finditer(text or "")
+    ]
+
+
+def detect_errors_vaani(text: str):
+    """
+    Tamil-specific rule/spell candidates using the open-source Python port of
+    Tamilinaiya/Vaani. The API evaluates adjacent word pairs and can propose
+    Tamil-specific orthographic / sandhi corrections.
+
+    We treat the returned suggestion as a candidate only when it differs from
+    the exact learner pair. Every candidate still requires human review.
+    """
+    try:
+        from tamilinaiyavaani import SpellChecker
+    except Exception as exc:
+        raise RuntimeError(f"Tamilinaiya/Vaani could not be imported: {exc}") from exc
+
+    tokens = tamil_word_tokens(text)
+    if len(tokens) < 2:
+        return []
+
+    out = []
+    seen = set()
+    pair_errors = 0
+
+    for i in range(len(tokens) - 1):
+        first = tokens[i]
+        second = tokens[i + 1]
+
+        # Do not send a pair across sentence/phrase punctuation. Ordinary spaces
+        # and line breaks are fine.
+        between = (text or "")[first["end"]:second["start"]]
+        if re.search(r"[.!?;:,।…]", between):
+            continue
+
+        w1 = first["text"]
+        w2 = second["text"]
+
+        try:
+            result = SpellChecker.REST_interface(w1, w2)
+        except Exception:
+            pair_errors += 1
+            continue
+
+        if not isinstance(result, (tuple, list)) or len(result) < 2:
+            continue
+
+        flag, suggestions = result[0], result[1]
+        if not isinstance(suggestions, (tuple, list)) or not suggestions:
+            continue
+
+        # The documented API returns two suggested words for a two-word input.
+        s1 = str(suggestions[0] if len(suggestions) >= 1 else w1).strip() or w1
+        s2 = str(suggestions[1] if len(suggestions) >= 2 else w2).strip() or w2
+
+        original_norm = normalise_candidate_span(f"{w1} {w2}")
+        suggested_norm = normalise_candidate_span(f"{s1} {s2}")
+
+        if not suggested_norm or suggested_norm == original_norm:
+            continue
+
+        source_start = first["start"]
+        source_end = second["end"]
+        learner_form = (text or "")[source_start:source_end]
+        suggested = f"{s1} {s2}".strip()
+
+        # Use WORD_FORM when Vaani changes a boundary/sandhi form; otherwise
+        # default to SPELLING. Reviewers may change the tag in the UI.
+        changed_count = int(normalise_candidate_span(w1) != normalise_candidate_span(s1))
+        changed_count += int(normalise_candidate_span(w2) != normalise_candidate_span(s2))
+        category = "WORD_FORM" if changed_count >= 1 else "SPELLING"
+
+        key = (normalise_candidate_span(learner_form), normalise_candidate_span(suggested))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        out.append({
+            "learner_form": learner_form,
+            "category": category,
+            "suggested_correction": suggested,
+            "note": "Tamilinaiya/Vaani Tamil rule/spell-check suggestion. Human verification required.",
+            "engines": ["vaani"],
+            "agreement": False,
+            "engine_meta": {
+                "flag": bool(flag),
+                "pair_index": i,
+            },
+        })
+
+    # Keep a small diagnostic on the function for the route response without
+    # contaminating annotation objects.
+    detect_errors_vaani.last_pair_errors = pair_errors
+    return out
+
+
+detect_errors_vaani.last_pair_errors = 0
+
 def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
     api_key = os.getenv("SARVAM_API_KEY")
     if not api_key:
@@ -1005,15 +1118,13 @@ def merge_error_candidates(*groups):
                 found["note"] = cand["note"]
 
             found["agreement"] = (
-                "sarvam" in found["engines"]
-                and "gemini" in found["engines"]
+                len(set(found.get("engines", []))) >= 2
                 and cand["category"] == found["category"]
             )
 
     for item in merged:
         item["agreement"] = bool(
-            "sarvam" in item["engines"]
-            and "gemini" in item["engines"]
+            len(set(item.get("engines", []))) >= 2
             and len(item.get("category_options", [])) == 1
         )
     return merged
@@ -1023,11 +1134,12 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
-        "version": "0.11.2.3",
+        "version": "0.11.3",
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
         "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash"),
-        "error_detection": "sarvam + gemini + rules",
+        "vaani_detector": "tamilinayavaani 0.14",
+        "error_detection": "Tamilinaiya/Vaani + Sarvam + Gemini + deterministic rules",
     }
 
 
@@ -1046,6 +1158,17 @@ async def detect_errors(payload: dict = Body(...)):
     rules = detect_rule_candidates(text)
 
     try:
+        vaani = detect_errors_vaani(text)
+        engines["vaani"] = {
+            "ok": True,
+            "count": len(vaani),
+            "pair_errors": int(getattr(detect_errors_vaani, "last_pair_errors", 0)),
+        }
+    except Exception as exc:
+        vaani = []
+        engines["vaani"] = {"ok": False, "error": str(exc)}
+
+    try:
         sarvam = detect_errors_sarvam(text, level, task)
         engines["sarvam"] = {"ok": True, "count": len(sarvam)}
     except Exception as exc:
@@ -1060,7 +1183,7 @@ async def detect_errors(payload: dict = Body(...)):
         engines["gemini"] = {"ok": False, "error": str(exc)}
 
     engines["rules"] = {"ok": True, "count": len(rules)}
-    candidates = merge_error_candidates(sarvam, gemini, rules)
+    candidates = merge_error_candidates(vaani, sarvam, gemini, rules)
 
     return {
         "categories": ERROR_CATEGORIES,

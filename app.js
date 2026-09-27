@@ -2313,7 +2313,7 @@ function renderErrorCandidates() {
         <div class="candidate-head">
           <div>
             <strong class="tamil">${escapeHtml(c.learner_form || "")}</strong>
-            ${c.agreement ? '<span class="agreement-chip">2-model agreement</span>' : ""}
+            ${c.agreement ? '<span class="agreement-chip">Multi-engine agreement</span>' : ""}
           </div>
           <span class="small">${escapeHtml(engines.join(" + ") || "candidate")}</span>
         </div>
@@ -2396,7 +2396,7 @@ async function runErrorDetection() {
 
   errorDetectionRunning = true;
   $("runErrorDetectionBtn").disabled = true;
-  $("errorDetectionStatus").textContent = "Running Sarvam + Gemini + rules…";
+  $("errorDetectionStatus").textContent = "Running Tamilinaiya/Vaani + Sarvam + Gemini + rules…";
   $("annotationStatus").textContent = "Detecting…";
 
   try {
