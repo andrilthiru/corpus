@@ -2169,16 +2169,15 @@ async function loadSelectedFile() {
   const file = $("uploadFile").files?.[0];
   if (!file) return;
 
+  // v0.11.2.2 deliberately follows the proven v0.9 upload path:
+  // selecting a file should only prepare its preview/metadata. It must not
+  // reset OCR state or touch the page-processing controller.
   savedSourceFileMeta = {
     name: file.name,
     size: file.size,
     type: file.type || "",
     lastModified: file.lastModified || null
   };
-
-  resetOcrPageProgress();
-  importedTranscriptionReview = null;
-  updateRecognitionImportStatus();
 
   if (uploadObjectUrl) {
     URL.revokeObjectURL(uploadObjectUrl);
@@ -2201,9 +2200,9 @@ async function loadSelectedFile() {
   }
 
   $("processingRoute").textContent = detectProcessingRoute(file);
+  updateUploadPreview();
   renderSourcePreview("sourcePreview");
   renderSourcePreview("simpleVerifySourcePreview");
-  updateUploadPreview();
   scheduleDraftAutosave();
 }
 
@@ -2672,24 +2671,57 @@ function wireNavigation() {
   $("verifiedText").addEventListener("input", scheduleDraftAutosave);
   $("verificationChecked").addEventListener("change", scheduleDraftAutosave);
 
-  $("uploadFile").addEventListener("change", loadSelectedFile);
+  $("uploadFile").addEventListener("change", async () => {
+    try {
+      await loadSelectedFile();
+    } catch (error) {
+      console.error("Could not prepare selected file", error);
+      const file = $("uploadFile").files?.[0];
+      if (file) {
+        savedSourceFileMeta = {
+          name: file.name,
+          size: file.size,
+          type: file.type || "",
+          lastModified: file.lastModified || null
+        };
+        $("processingRoute").textContent = detectProcessingRoute(file);
+        updateUploadPreview();
+      }
+    }
+  });
   $("recognitionJsonFile").addEventListener("change", loadRecognitionReviewFile);
   $("retryOcrBtn").addEventListener("click", processRecognitionAutomatically);
 
   $("uploadToProcess").addEventListener("click", async () => {
-    if (!$("uploadFile").files?.[0]) {
+    const file = $("uploadFile").files?.[0];
+    if (!file) {
       alert("Select a learner document first.");
       return;
     }
 
-    await loadSelectedFile();
+    // Important: Stage 2 opens first. A preview/autosave/backend error must
+    // never make the Process document button appear dead.
     goUploadStep(2);
+    $("processingRoute").textContent = detectProcessingRoute(file);
+    $("recognitionImportStatus").className = "recognition-status processing";
+    $("recognitionImportStatus").textContent = "Preparing page-by-page recognition…";
 
-    const file = $("uploadFile").files?.[0];
-    const lower = file?.name?.toLowerCase() || "";
+    try {
+      await loadSelectedFile();
+    } catch (error) {
+      console.error("File preparation warning", error);
+      // Continue: OCR can still operate on the File object even if an
+      // optional preview failed.
+    }
 
+    const lower = file.name.toLowerCase();
     if (!lower.endsWith(".txt") && !lower.endsWith(".json") && !lower.endsWith(".docx")) {
-      await processRecognitionAutomatically();
+      try {
+        await processRecognitionAutomatically();
+      } catch (error) {
+        console.error("OCR start failed", error);
+        setOcrProcessing(false, `Automatic OCR failed: ${error.message}`);
+      }
     }
   });
 
