@@ -26,6 +26,7 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
+from strike_detect import mark_struck_words
 from tamil_taxonomy import (CODES as TAMIL_SUBTYPE_CODES, SUBTYPES as TAMIL_SUBTYPES, SUBTYPE_TO_LEGACY,
                             LEGACY_TO_SUBTYPE, GROUPS as TAMIL_GROUPS, assign_tag, taxonomy_prompt_block)
 
@@ -269,6 +270,10 @@ def process_one_page(
         raise RuntimeError(f"Sarvam returned zero pages for page {page_number}.")
 
     google_page = run_google_vision(page_img)
+    try:
+        mark_struck_words(page_img, google_page["words"])      # crossed-out words (learner self-corrections)
+    except Exception as exc:                                   # never block OCR on this optional signal
+        print(f"strike detection skipped: {exc}")
     blocks = normalize_sarvam_blocks(sarvam_pages[0], page_img)
     surya_lines = detect_surya_lines(page_img)
     records = map_blocks_to_lines(blocks, surya_lines, page_number)
@@ -1254,7 +1259,7 @@ def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
         ],
         "temperature": 0.1,
         "reasoning_effort": None,
-        "max_tokens": 2400,
+        "max_tokens": 6000,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -1297,7 +1302,7 @@ def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
             ],
             "temperature": 0.1,
             "reasoning_effort": None,
-            "max_tokens": 2400,
+            "max_tokens": 6000,
             "response_format": {"type": "json_object"},
         }
         fallback = httpx.post(

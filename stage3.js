@@ -29,7 +29,8 @@ const ISSUE_KINDS = {
   WEAK_WORD:      { label: "Hard-to-read line · least certain word", actions: ["accept", "edit"] },
   LINE_UNCERTAIN: { label: "No second OCR reading · check line", actions: ["accept", "edit"] },
   DISAGREE_LINE:  { label: "OCR engines disagree (whole line)", actions: ["optionA", "optionB", "edit"] },   // legacy drafts only
-  NON_LEARNER:    { label: "Possible non-learner text", actions: ["exclude", "keep"] }
+  NON_LEARNER:    { label: "Possible non-learner text", actions: ["exclude", "keep"] },
+  STRUCK:         { label: "Crossed out by the learner?", actions: ["remove_word", "keep"] }
 };
 
 let activeIssueId = null;
@@ -103,7 +104,8 @@ function buildLineIssues(line) {
   const A = tokensWithOffsets(text);
   const gWords = Array.isArray(line?.secondary_ocr?.words) ? line.secondary_ocr.words : [];
   const bRaw = (line?.secondary_ocr?.raw_text || "").trim();
-  const B = gWords.length ? gWords.map((w) => ({ text: String(w.text || ""), bbox: w.bbox, conf: w.confidence }))
+  const isStruck = (w) => Boolean(w?.strike?.level);
+  const B = gWords.length ? gWords.filter((w) => !isStruck(w)).map((w) => ({ text: String(w.text || ""), bbox: w.bbox, conf: w.confidence }))
                           : tokensWithOffsets(bRaw).map((t) => ({ text: t.text }));
   const issues = [];
   let n = 0;
@@ -114,6 +116,7 @@ function buildLineIssues(line) {
 
   if (!text.trim()) return issues;
 
+  const covered = (s, e) => issues.some((i) => s < i.end && e > i.start);
   if (looksNonLearner(line, text)) {
     add("NON_LEARNER", 0, text.length);
     return issues;
@@ -161,8 +164,14 @@ function buildLineIssues(line) {
   }
 
   // 2. low-confidence words (Google confidence) that are not already covered
-  const covered = (s, e) => issues.some((i) => s < i.end && e > i.start);
+  // 0. "maybe" crossed-out words → one-click item (high-confidence ones were already removed in prepare)
+  gWords.filter((w) => w?.strike?.level === "maybe").forEach((w) => {
+    const tok = A.find((t) => s3cmp(t.text) === s3cmp(w.text) && !covered(t.start, t.end));
+    if (tok) add("STRUCK", tok.start, tok.end, { bbox: w.bbox, confidence: w.strike.score });
+  });
+
   gWords.forEach((w) => {
+    if (isStruck(w)) return;
     if (typeof w.confidence !== "number" || w.confidence >= EXCEPTION_RULES.googleLowWordConfidence) return;
     const tok = A.find((t) => s3cmp(t.text) === s3cmp(w.text) && !covered(t.start, t.end));
     if (tok) add("LOW_CONF", tok.start, tok.end, { bbox: w.bbox, confidence: w.confidence });
@@ -185,11 +194,39 @@ function buildLineIssues(line) {
 }
 
 /* Called from normaliseImportedReview for every line (new OCR pages, imported JSON, resumed drafts). */
+/* High-confidence crossed-out words are taken out of the transcript before review. They are kept as
+   line.review.struck_out (the learner's self-corrections) and as a resolved STRUCK issue with Undo. */
+function removeStruckWords(line) {
+  const gWords = Array.isArray(line?.secondary_ocr?.words) ? line.secondary_ocr.words : [];
+  const struck = gWords.filter((w) => w?.strike?.level === "high");
+  line.review.struck_out = line.review.struck_out || [];
+  const autoIssues = [];
+  let text = lineText(line);
+  struck.forEach((w, k) => {
+    const tok = tokensWithOffsets(text).find((t) => s3cmp(t.text) === s3cmp(w.text));
+    const rec = { text: w.text, score: w.strike.score, kind: w.strike.kind, bbox: w.bbox, in_ocr_text: Boolean(tok) };
+    line.review.struck_out.push(rec);
+    if (!tok) return;                                   // Sarvam already left it out
+    let s = tok.start, e = tok.end;
+    if (/\s/.test(text[e] || "")) e += 1; else if (s > 0 && /\s/.test(text[s - 1])) s -= 1;
+    const removed = text.slice(s, e);
+    text = text.slice(0, s) + text.slice(e);
+    // shift earlier auto issues that sit after this cut
+    autoIssues.forEach((i) => { if (i.start > s) { i.start -= removed.length; i.end = i.start; } });
+    autoIssues.push({ id: `${line.line_id}#s${k + 1}`, line_id: line.line_id, page: Number(line.page_number || 1),
+      kind: "STRUCK", start: s, end: s, text: "", bbox: w.bbox, confidence: w.strike.score, status: "resolved",
+      resolution: { action: "auto_remove", prev: removed, value: "", origin: "struck_out", auto: true } });
+  });
+  line.review.verified_text = text;
+  return autoIssues;
+}
+
 function prepareLineForExceptionReview(line) {
   line.review = line.review || {};
   if (Array.isArray(line.review.issues)) return line;              // already prepared
   const legacyDone = line.review.status === "CONFIRMED" || line.review.status === "IGNORED";
-  line.review.issues = legacyDone || !lineIncluded(line) ? [] : buildLineIssues(line);
+  const auto = legacyDone || !lineIncluded(line) ? [] : removeStruckWords(line);
+  line.review.issues = legacyDone || !lineIncluded(line) ? [] : auto.concat(buildLineIssues(line));
   line.review.ocr_corrections = line.review.ocr_corrections || [];
   if (!legacyDone) {
     if (!lineIncluded(line)) line.review.status = "IGNORED";
@@ -232,6 +269,14 @@ function resolveIssue(issueId, action, value = null) {
     lineIssues(line).forEach((i) => {
       if (i.status === "open") { i.status = "resolved"; i.resolution = { action: "exclude", origin: "excluded" }; }
     });
+  } else if (action === "remove_word") {
+    const text = lineText(line);
+    if (/\s/.test(text[issue.end] || "")) issue.end += 1; else if (issue.start > 0 && /\s/.test(text[issue.start - 1])) issue.start -= 1;
+    const prev = replaceInLine(line, issue, "");
+    issue.status = "resolved";
+    issue.resolution = { action, prev, value: "", origin: "struck_out", at: new Date().toISOString() };
+    line.review.struck_out = line.review.struck_out || [];
+    line.review.struck_out.push({ text: prev.trim(), score: issue.confidence ?? null, kind: "reviewer", in_ocr_text: true });
   } else if (action === "keep") {
     issue.status = "resolved";
     issue.resolution = { action: "keep", origin: "kept" };
@@ -271,6 +316,9 @@ function reopenIssue(issueId) {
     line.review.include_in_corpus = true;
     lineIssues(line).forEach((i) => { if (i.resolution?.action === "exclude") { i.status = "open"; i.resolution = null; } });
   } else {
+    if (r.origin === "struck_out") {
+      line.review.struck_out = (line.review.struck_out || []).filter((x) => x.text !== String(r.prev || "").trim());
+    }
     if (r.prev != null && r.value != null && r.prev !== r.value) {
       replaceInLine(line, issue, r.prev);
       line.review.ocr_corrections = line.review.ocr_corrections.filter((c) => c.issue_id !== issue.id);
@@ -385,7 +433,7 @@ function pageReviewStatus(page) {
 }
 function stage3Stats() {
   const lines = reviewLines();
-  const issues = allIssues(lines).filter(({ issue, line }) => lineIncluded(line) || issue.status === "resolved");
+  const issues = allIssues(lines).filter(({ issue, line }) => !issue.resolution?.auto && (lineIncluded(line) || issue.status === "resolved"));
   const withIssues = new Set(issues.map(({ line }) => line.line_id));
   const total = issues.length;
   const resolved = issues.filter(({ issue }) => issue.status === "resolved").length;
@@ -412,6 +460,11 @@ function lineHtmlWithIssues(line) {
   for (const i of issues) {
     if (i.start < pos) continue;
     html += escapeHtml(text.slice(pos, i.start));
+    if (i.kind === "STRUCK" && i.status === "resolved" && i.resolution?.origin === "struck_out") {
+      if (showExcludedLines) html += `<s class="t-struck" data-issue-id="${escapeHtml(i.id)}" title="Crossed out by the learner — not in the transcript">${escapeHtml((i.resolution.prev || "").trim())}</s> `;
+      pos = i.start;
+      continue;
+    }
     const cls = ["t-issue", i.status, i.resolution?.origin === "ocr_corrected" ? "corrected" : "", i.id === activeIssueId ? "active" : ""].join(" ");
     const title = i.status === "open" ? ISSUE_KINDS[i.kind]?.label
       : (i.resolution?.origin === "ocr_corrected" ? `OCR corrected: ${i.resolution.prev} → ${i.resolution.value}` : "Confirmed");
@@ -527,9 +580,9 @@ function actionButton(action, issue) {
   const labels = {
     optionA: `A · ${opt("optionA")?.engine?.replace(/_.*/, "") || "Sarvam"}`,
     optionB: `B · ${opt("optionB")?.engine?.replace(/_.*/, "") || "Google"}`,
-    accept: "Accept", edit: "Edit", exclude: "Exclude", keep: "Keep"
+    accept: "Accept", edit: "Edit", exclude: "Exclude", keep: "Keep", remove_word: "Remove word"
   };
-  const primary = ["accept", "optionA", "exclude"].includes(action) ? "primary-btn" : "";
+  const primary = ["accept", "optionA", "exclude", "remove_word"].includes(action) ? "primary-btn" : "";
   return `<button type="button" class="rail-btn ${primary}" data-issue-action="${action}">${labels[action]}</button>`;
 }
 
@@ -583,7 +636,8 @@ function renderReviewRail() {
     const isOpen = issue.status === "open" && lineIncluded(line);
     if (!isOpen) {
       const r = issue.resolution || {};
-      const what = r.origin === "ocr_corrected" ? `→ ${r.value}` : r.origin === "excluded" ? "excluded" : r.origin === "kept" ? "kept" : "confirmed";
+      const what = r.origin === "ocr_corrected" ? `→ ${r.value}` : r.origin === "excluded" ? "excluded" : r.origin === "kept" ? "kept"
+        : r.origin === "struck_out" ? (r.auto ? "crossed out · removed automatically" : "crossed out · removed") : "confirmed";
       return `<article class="rail-item resolved ${active ? "active" : ""}" data-rail-issue="${escapeHtml(issue.id)}">
         <div class="rail-item-head"><span class="tamil rail-span">${escapeHtml(r.prev ?? issue.text)}</span>
           <span class="rail-status ok tamil">${escapeHtml(what)}</span>

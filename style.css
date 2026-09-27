@@ -1488,3 +1488,7 @@ mark.a-mark.corrected.s-pending { opacity: .75; }
 .a-chip.tag-high { border-color: var(--g-nadai); color: var(--g-nadai); }
 .a-chip.tag-medium { border-color: #9aa3b2; color: #4b5563; }
 .a-chip.tag-low { border-color: var(--st-open); color: var(--st-open); }
+
+/* crossed-out words (learner self-corrections): hidden from the transcript, shown on request */
+s.t-struck { color: #9aa1ad; text-decoration: line-through; text-decoration-thickness: 2px; font-size: .92em; cursor: pointer; }
+.review-word-box.struck { stroke: #6b7280; stroke-dasharray: 6 4; }
