@@ -70,6 +70,10 @@
           <h2>Upload Learner Material</h2>
           <p class="subtext">Build a corpus record through metadata, OCR/HTR, verification and annotation.</p>
         </div>
+        <div class="draft-save-tools">
+          <span id="draftSaveStatus" class="draft-save-status">Autosave ready</span>
+          <button id="draftSaveNowBtn" type="button">Save draft now</button>
+        </div>
       </div>
 
       <div class="pipeline" id="uploadPipeline">
@@ -82,6 +86,18 @@
 
       <div class="panel upload-step-panel active" data-upload-panel="1">
         <h3>1. Document and metadata</h3>
+
+        <div id="draftResumePanel" class="draft-resume-panel hidden">
+          <div>
+            <strong>Unfinished review found on this browser</strong>
+            <div id="draftResumeSummary" class="small"></div>
+          </div>
+          <div class="draft-resume-actions">
+            <button id="resumeDraftBtn" type="button" class="primary-btn">Resume review</button>
+            <button id="discardDraftBtn" type="button">Discard saved draft</button>
+          </div>
+        </div>
+
         <div class="form-grid">
           <label>
             Document ID

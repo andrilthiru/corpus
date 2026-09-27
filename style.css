@@ -1160,3 +1160,71 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .ocr-choice-grid,
   .candidate-meta { grid-template-columns: 1fr; }
 }
+
+
+/* =========================================================
+   v0.11.2 — local autosave / resume
+   ========================================================= */
+.draft-save-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.draft-save-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid #d9dde5;
+  background: #f7f8fa;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.draft-save-status.saved {
+  background: #f1f8f3;
+  border-color: #bed8c5;
+}
+.draft-save-status.saving {
+  background: #fff8e8;
+  border-color: #e4cf9b;
+}
+.draft-save-status.error {
+  background: #fff1f0;
+  border-color: #e0b5b2;
+}
+.draft-save-status.muted {
+  opacity: .75;
+}
+.draft-resume-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 13px 14px;
+  margin-bottom: 16px;
+  border: 1px solid #bfd0e5;
+  border-radius: 10px;
+  background: #f6f9fd;
+}
+.draft-resume-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.draft-local-note {
+  opacity: .72;
+}
+@media (max-width: 720px) {
+  .draft-save-tools {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+  .draft-resume-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

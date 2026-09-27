@@ -940,6 +940,342 @@ let activeReviewLineId = null;
 let errorCandidates = [];
 let errorDetectionRunning = false;
 
+// v0.11.2 local draft persistence
+const DRAFT_DB_NAME = "themozhi-corpus-review";
+const DRAFT_DB_VERSION = 1;
+const DRAFT_STORE = "drafts";
+const ACTIVE_DRAFT_KEY = "active";
+let draftDbPromise = null;
+let draftAutosaveTimer = null;
+let draftAutosaveEnabled = false;
+let restoringDraft = false;
+let savedSourceFileMeta = null;
+
+
+function openDraftDb() {
+  if (draftDbPromise) return draftDbPromise;
+
+  draftDbPromise = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB is not available in this browser."));
+      return;
+    }
+
+    const request = indexedDB.open(DRAFT_DB_NAME, DRAFT_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DRAFT_STORE)) {
+        db.createObjectStore(DRAFT_STORE, { keyPath: "key" });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open local draft storage."));
+  });
+
+  return draftDbPromise;
+}
+
+async function draftDbGet(key = ACTIVE_DRAFT_KEY) {
+  const db = await openDraftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE, "readonly");
+    const request = tx.objectStore(DRAFT_STORE).get(key);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error("Could not read saved draft."));
+  });
+}
+
+async function draftDbPut(record) {
+  const db = await openDraftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE, "readwrite");
+    tx.objectStore(DRAFT_STORE).put(record);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Could not save draft."));
+    tx.onabort = () => reject(tx.error || new Error("Draft save was aborted."));
+  });
+}
+
+async function draftDbDelete(key = ACTIVE_DRAFT_KEY) {
+  const db = await openDraftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE, "readwrite");
+    tx.objectStore(DRAFT_STORE).delete(key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Could not delete saved draft."));
+  });
+}
+
+function setDraftSaveStatus(message, state = "") {
+  const target = $("draftSaveStatus");
+  if (!target) return;
+  target.textContent = message;
+  target.className = `draft-save-status ${state}`.trim();
+}
+
+function currentSourceFileMeta() {
+  const file = $("uploadFile")?.files?.[0];
+  if (file) {
+    return {
+      name: file.name,
+      size: file.size,
+      type: file.type || "",
+      lastModified: file.lastModified || null
+    };
+  }
+  return savedSourceFileMeta ? { ...savedSourceFileMeta } : null;
+}
+
+function draftSnapshot() {
+  return {
+    key: ACTIVE_DRAFT_KEY,
+    version: "0.11.2",
+    saved_at: new Date().toISOString(),
+    workflow_stage: Number(uploadCurrentStep || 1),
+    metadata: {
+      id: $("uploadDocId").value.trim(),
+      level: $("uploadLevel").value,
+      year: String($("uploadYear").value || ""),
+      task: $("uploadTask").value,
+      topic: $("uploadTopic").value.trim(),
+      title: $("uploadTitle").value.trim(),
+      prompt: $("uploadPrompt").value.trim(),
+      source_type: $("uploadSourceType").value
+    },
+    source_file: currentSourceFileMeta(),
+    processing_route: $("processingRoute")?.textContent || "",
+    transcription_review: reviewExportSnapshot(),
+    ocr_page_states: JSON.parse(JSON.stringify(ocrPageStates || [])),
+    review_state: {
+      page: Number(reviewPage || 1),
+      zoom: Number(reviewZoom || 1),
+      active_line_id: activeReviewLineId || null
+    },
+    machine_text: $("machineText").value || "",
+    verified_text: $("verifiedText").value || "",
+    verification_checked: Boolean($("verificationChecked").checked),
+    error_candidates: JSON.parse(JSON.stringify(errorCandidates || [])),
+    annotations: JSON.parse(JSON.stringify(draftAnnotations || []))
+  };
+}
+
+function draftIsMeaningful(snapshot) {
+  const m = snapshot?.metadata || {};
+  return Boolean(
+    snapshot?.source_file?.name
+    || snapshot?.transcription_review?.lines?.length
+    || snapshot?.annotations?.length
+    || snapshot?.error_candidates?.length
+    || snapshot?.machine_text
+    || snapshot?.verified_text
+    || m.id
+    || m.topic
+    || m.title
+    || m.prompt
+    || Number(snapshot?.workflow_stage || 1) > 1
+  );
+}
+
+async function saveDraftNow({ silent = false } = {}) {
+  if (!draftAutosaveEnabled || restoringDraft) return false;
+
+  const snapshot = draftSnapshot();
+  if (!draftIsMeaningful(snapshot)) {
+    if (!silent) setDraftSaveStatus("Nothing to save", "muted");
+    return false;
+  }
+
+  setDraftSaveStatus("Saving…", "saving");
+
+  try {
+    await draftDbPut(snapshot);
+    savedSourceFileMeta = snapshot.source_file ? { ...snapshot.source_file } : savedSourceFileMeta;
+    const when = new Date(snapshot.saved_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDraftSaveStatus(`Saved locally · ${when}`, "saved");
+    return true;
+  } catch (error) {
+    // Page previews can be large. If browser quota is tight, preserve the
+    // important review/annotation state without image previews.
+    const quotaLike = error?.name === "QuotaExceededError"
+      || /quota|space|storage/i.test(String(error?.message || ""));
+
+    if (quotaLike && snapshot.transcription_review?.page_previews) {
+      try {
+        const slim = JSON.parse(JSON.stringify(snapshot));
+        slim.transcription_review.page_previews = {};
+        slim.storage_mode = "text_only_fallback";
+        await draftDbPut(slim);
+        setDraftSaveStatus("Saved review state · page images omitted", "saved");
+        return true;
+      } catch (fallbackError) {
+        console.error("Draft fallback save failed", fallbackError);
+      }
+    }
+
+    console.error("Draft autosave failed", error);
+    setDraftSaveStatus("Autosave failed", "error");
+    return false;
+  }
+}
+
+function scheduleDraftAutosave() {
+  if (!draftAutosaveEnabled || restoringDraft) return;
+  clearTimeout(draftAutosaveTimer);
+  setDraftSaveStatus("Changes pending…", "saving");
+  draftAutosaveTimer = setTimeout(() => {
+    saveDraftNow({ silent: true });
+  }, 500);
+}
+
+function savedDraftStats(snapshot) {
+  const lines = Array.isArray(snapshot?.transcription_review?.lines)
+    ? snapshot.transcription_review.lines
+    : [];
+  const reviewed = lines.filter((line) =>
+    line?.review?.status === "CONFIRMED" || line?.review?.status === "IGNORED"
+  ).length;
+  const total = lines.length;
+  const pageCount = Number(snapshot?.transcription_review?.page_count || 0);
+  const page = Number(snapshot?.review_state?.page || 1);
+  const anns = Array.isArray(snapshot?.annotations) ? snapshot.annotations.length : 0;
+  return { reviewed, total, pageCount, page, anns };
+}
+
+function renderSavedDraftOffer(snapshot) {
+  const panel = $("draftResumePanel");
+  if (!panel) return;
+
+  if (!snapshot || !draftIsMeaningful(snapshot)) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  const stats = savedDraftStats(snapshot);
+  const id = snapshot?.metadata?.id || "Draft";
+  const filename = snapshot?.source_file?.name || snapshot?.transcription_review?.source_filename || "No source filename";
+  const when = snapshot?.saved_at
+    ? new Date(snapshot.saved_at).toLocaleString()
+    : "Unknown save time";
+
+  $("draftResumeSummary").innerHTML = `
+    ${escapeHtml(id)} · ${escapeHtml(filename)}
+    ${stats.pageCount ? ` · Page ${stats.page}/${stats.pageCount}` : ""}
+    ${stats.total ? ` · ${stats.reviewed}/${stats.total} regions reviewed` : ""}
+    ${stats.anns ? ` · ${stats.anns} annotation(s)` : ""}
+    <br>Last saved: ${escapeHtml(when)}
+    <br><span class="draft-local-note">Stored only in this browser on this device.</span>
+  `;
+  panel.classList.remove("hidden");
+}
+
+async function findAndOfferSavedDraft() {
+  try {
+    const saved = await draftDbGet();
+    renderSavedDraftOffer(saved);
+    if (saved && draftIsMeaningful(saved)) {
+      setDraftSaveStatus("Saved draft available", "saved");
+    } else {
+      setDraftSaveStatus("Autosave ready", "muted");
+    }
+    return saved;
+  } catch (error) {
+    console.warn("Local draft storage unavailable", error);
+    setDraftSaveStatus("Local autosave unavailable", "error");
+    return null;
+  }
+}
+
+function applySavedMetadata(metadata = {}) {
+  $("uploadDocId").value = metadata.id || "";
+  $("uploadLevel").value = metadata.level || "P4";
+  $("uploadYear").value = metadata.year || "2026";
+  $("uploadTask").value = metadata.task || "Composition";
+  $("uploadTopic").value = metadata.topic || "";
+  $("uploadTitle").value = metadata.title || "";
+  $("uploadPrompt").value = metadata.prompt || "";
+  $("uploadSourceType").value = metadata.source_type || "auto";
+}
+
+async function restoreSavedDraft(snapshot) {
+  if (!snapshot) return;
+
+  restoringDraft = true;
+  clearTimeout(draftAutosaveTimer);
+
+  try {
+    applySavedMetadata(snapshot.metadata || {});
+    savedSourceFileMeta = snapshot.source_file ? { ...snapshot.source_file } : null;
+    $("uploadFile").value = "";
+
+    importedTranscriptionReview = snapshot.transcription_review
+      ? normaliseImportedReview(snapshot.transcription_review)
+      : null;
+
+    ocrPageStates = Array.isArray(snapshot.ocr_page_states)
+      ? snapshot.ocr_page_states.map((x) => ({
+          ...x,
+          status: x.status === "processing" ? "waiting" : x.status
+        }))
+      : [];
+
+    reviewPage = Math.max(1, Number(snapshot?.review_state?.page || 1));
+    reviewZoom = Number(snapshot?.review_state?.zoom || 1);
+    activeReviewLineId = snapshot?.review_state?.active_line_id || null;
+
+    errorCandidates = Array.isArray(snapshot.error_candidates)
+      ? JSON.parse(JSON.stringify(snapshot.error_candidates))
+      : [];
+    draftAnnotations = Array.isArray(snapshot.annotations)
+      ? JSON.parse(JSON.stringify(snapshot.annotations))
+      : [];
+
+    $("machineText").value = snapshot.machine_text || "";
+    $("verifiedText").value = snapshot.verified_text || "";
+    $("verificationChecked").checked = Boolean(snapshot.verification_checked);
+    $("processingRoute").textContent = snapshot.processing_route || "Saved draft";
+    ocrProcessing = false;
+
+    updateUploadPreview();
+    updateRecognitionImportStatus();
+    renderOcrProgress();
+    renderDraftAnnotations();
+    renderStructuredReview();
+    renderAnnotationWorkspace();
+
+    let targetStep = Math.max(1, Math.min(5, Number(snapshot.workflow_stage || 1)));
+    const hasReview = reviewLines().length > 0;
+    if (targetStep === 2 && hasReview) targetStep = 3;
+
+    goUploadStep(targetStep);
+
+    const stats = savedDraftStats(snapshot);
+    if (targetStep === 3 && stats.total) {
+      requestAnimationFrame(scrollActiveRegionIntoView);
+    }
+
+    $("draftResumePanel").classList.add("hidden");
+    const when = snapshot?.saved_at
+      ? new Date(snapshot.saved_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
+    setDraftSaveStatus(when ? `Resumed · saved ${when}` : "Draft resumed", "saved");
+  } finally {
+    restoringDraft = false;
+  }
+}
+
+async function discardSavedDraft() {
+  clearTimeout(draftAutosaveTimer);
+  try {
+    await draftDbDelete();
+  } catch (error) {
+    console.warn("Could not delete saved draft", error);
+  }
+  $("draftResumePanel")?.classList.add("hidden");
+  setDraftSaveStatus("Autosave ready", "muted");
+}
+
 function reviewLines() {
   return Array.isArray(importedTranscriptionReview?.lines)
     ? importedTranscriptionReview.lines
@@ -1002,6 +1338,7 @@ function goUploadStep(step) {
 
   if (uploadCurrentStep === 4) renderAnnotationWorkspace();
   if (uploadCurrentStep === 5) renderRecordReview();
+  scheduleDraftAutosave();
 }
 
 function normaliseImportedReview(parsed) {
@@ -1372,6 +1709,7 @@ async function processSingleOcrPage(file, pageNumber, runSerial) {
     updateRecognitionImportStatus();
     renderOcrProgress();
     rerenderReviewPreservingEditor();
+    scheduleDraftAutosave();
     return true;
   } catch (error) {
     if (runSerial !== ocrRunSerial || error?.name === "AbortError") return false;
@@ -1379,6 +1717,7 @@ async function processSingleOcrPage(file, pageNumber, runSerial) {
     state.error = error.message;
     renderOcrProgress();
     updateRecognitionImportStatus();
+    scheduleDraftAutosave();
     return false;
   } finally {
     if (currentOcrController === controller) currentOcrController = null;
@@ -1485,6 +1824,7 @@ function setActiveReviewLine(lineId, { scroll = true } = {}) {
   renderActiveReviewCard();
   renderPageReviewQueue();
   if (scroll) requestAnimationFrame(scrollActiveRegionIntoView);
+  scheduleDraftAutosave();
 }
 
 function autoAdvanceReview() {
@@ -1531,6 +1871,7 @@ function applyReviewDecision(kind, value = "") {
   }
 
   updateReviewProgress();
+  scheduleDraftAutosave();
   autoAdvanceReview();
 }
 
@@ -1823,6 +2164,13 @@ async function loadSelectedFile() {
   const file = $("uploadFile").files?.[0];
   if (!file) return;
 
+  savedSourceFileMeta = {
+    name: file.name,
+    size: file.size,
+    type: file.type || "",
+    lastModified: file.lastModified || null
+  };
+
   resetOcrPageProgress();
   importedTranscriptionReview = null;
   updateRecognitionImportStatus();
@@ -1852,14 +2200,26 @@ async function loadSelectedFile() {
   renderSourcePreview("verifySourcePreview");
   renderSourcePreview("simpleVerifySourcePreview");
   updateUploadPreview();
+  scheduleDraftAutosave();
 }
 
 function updateUploadPreview() {
   const file = $("uploadFile").files?.[0];
 
   if (!file) {
-    $("uploadPreview").className = "upload-preview empty";
-    $("uploadPreview").textContent = "Select a file to preview its metadata.";
+    if (savedSourceFileMeta?.name) {
+      $("uploadPreview").className = "upload-preview";
+      $("uploadPreview").innerHTML = `
+        <strong>${escapeHtml(savedSourceFileMeta.name)}</strong><br>
+        <span class="small">
+          Saved review draft restored. The browser cannot restore the original local file automatically.
+          Existing OCR/review data remains available; re-select the source only if you need to process it again.
+        </span>
+      `;
+    } else {
+      $("uploadPreview").className = "upload-preview empty";
+      $("uploadPreview").textContent = "Select a file to preview its metadata.";
+    }
     return;
   }
 
@@ -1926,6 +2286,7 @@ function addAcceptedAnnotation(candidate, categoryOverride = "") {
   }
   renderDraftAnnotations();
   renderAnnotationWorkspace();
+  scheduleDraftAutosave();
 }
 
 function renderErrorCandidates() {
@@ -1994,11 +2355,13 @@ function renderErrorCandidates() {
       c.review_status = "ACCEPTED";
       addAcceptedAnnotation(c, c.category);
       renderErrorCandidates();
+      scheduleDraftAutosave();
     });
 
     card.querySelector("[data-candidate-reject]").addEventListener("click", () => {
       c.review_status = "REJECTED";
       renderErrorCandidates();
+      scheduleDraftAutosave();
     });
 
     card.querySelector("[data-candidate-edit]").addEventListener("click", () => {
@@ -2008,6 +2371,7 @@ function renderErrorCandidates() {
       $("annotationNote").value = c.note || "";
       c.review_status = "EDITING";
       renderErrorCandidates();
+      scheduleDraftAutosave();
       $("annotationText").focus();
     });
   });
@@ -2060,6 +2424,7 @@ async function runErrorDetection() {
       `${errorCandidates.length} candidate(s) · ${engineText}`;
     $("annotationStatus").textContent = `${errorCandidates.length} candidates`;
     renderErrorCandidates();
+    scheduleDraftAutosave();
   } catch (error) {
     $("errorDetectionStatus").textContent = `Detection failed: ${error.message}`;
     $("annotationStatus").textContent = "Detection error";
@@ -2088,6 +2453,7 @@ function addDraftAnnotation() {
   $("annotationSuggested").value = "";
   $("annotationNote").value = "";
   renderDraftAnnotations();
+  scheduleDraftAutosave();
 }
 
 function renderDraftAnnotations() {
@@ -2112,6 +2478,7 @@ function renderDraftAnnotations() {
     button.addEventListener("click", () => {
       draftAnnotations.splice(Number(button.dataset.removeAnnotation), 1);
       renderDraftAnnotations();
+      scheduleDraftAutosave();
     });
   });
 }
@@ -2174,7 +2541,10 @@ async function copyRecordJson() {
   }
 }
 
-function resetUploadWorkflow() {
+function resetUploadWorkflow({ clearSaved = true } = {}) {
+  restoringDraft = true;
+  clearTimeout(draftAutosaveTimer);
+
   $("uploadDocId").value = "";
   $("uploadYear").value = "2026";
   $("uploadTopic").value = "";
@@ -2183,6 +2553,7 @@ function resetUploadWorkflow() {
   $("uploadSourceType").value = "auto";
   $("uploadFile").value = "";
   $("recognitionJsonFile").value = "";
+  savedSourceFileMeta = null;
   importedTranscriptionReview = null;
   reviewPage = 1;
   reviewZoom = 1;
@@ -2203,7 +2574,16 @@ function resetUploadWorkflow() {
   setOcrProcessing(false);
   renderStructuredReview();
   goUploadStep(1);
+
+  restoringDraft = false;
+
+  if (clearSaved) {
+    discardSavedDraft();
+  } else {
+    setDraftSaveStatus("Autosave ready", "muted");
+  }
 }
+
 
 function wireNavigation() {
   document.querySelectorAll(".navbtn").forEach((button) => {
@@ -2266,9 +2646,28 @@ function wireNavigation() {
   });
 
   ["uploadDocId", "uploadLevel", "uploadYear", "uploadTask", "uploadTopic", "uploadTitle", "uploadPrompt", "uploadSourceType"].forEach((id) => {
-    $(id).addEventListener("input", updateUploadPreview);
-    $(id).addEventListener("change", updateUploadPreview);
+    $(id).addEventListener("input", () => {
+      updateUploadPreview();
+      scheduleDraftAutosave();
+    });
+    $(id).addEventListener("change", () => {
+      updateUploadPreview();
+      scheduleDraftAutosave();
+    });
   });
+
+  $("draftSaveNowBtn").addEventListener("click", () => saveDraftNow());
+  $("resumeDraftBtn").addEventListener("click", async () => {
+    const saved = await draftDbGet().catch(() => null);
+    if (saved) await restoreSavedDraft(saved);
+  });
+  $("discardDraftBtn").addEventListener("click", async () => {
+    await discardSavedDraft();
+  });
+
+  $("machineText").addEventListener("input", scheduleDraftAutosave);
+  $("verifiedText").addEventListener("input", scheduleDraftAutosave);
+  $("verificationChecked").addEventListener("change", scheduleDraftAutosave);
 
   $("uploadFile").addEventListener("change", loadSelectedFile);
   $("recognitionJsonFile").addEventListener("change", loadRecognitionReviewFile);
@@ -2354,6 +2753,7 @@ function wireNavigation() {
     reviewPage = Math.max(1, reviewPage - 1);
     activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
     renderStructuredReview();
+    scheduleDraftAutosave();
   });
 
   $("reviewNextPage").addEventListener("click", () => {
@@ -2361,6 +2761,7 @@ function wireNavigation() {
     reviewPage = Math.min(total, reviewPage + 1);
     activeReviewLineId = pageLines(reviewPage).find((line) => !reviewedLine(line))?.line_id || pageLines(reviewPage)[0]?.line_id || null;
     renderStructuredReview();
+    scheduleDraftAutosave();
   });
 
   $("reviewZoomOut").addEventListener("click", () => {
@@ -2389,7 +2790,7 @@ function wireNavigation() {
   $("uploadToReview").addEventListener("click", () => goUploadStep(5));
   $("downloadRecordBtn").addEventListener("click", downloadRecordJson);
   $("copyRecordBtn").addEventListener("click", copyRecordJson);
-  $("resetUploadBtn").addEventListener("click", resetUploadWorkflow);
+  $("resetUploadBtn").addEventListener("click", () => resetUploadWorkflow({ clearSaved: true }));
 
   renderDraftAnnotations();
   updateRecognitionImportStatus();
@@ -2400,22 +2801,35 @@ function wireNavigation() {
 }
 
 async function init() {
-  const response = await fetch("data/corpus.json", { cache: "no-store" });
+  // Wire the interface first. Upload/review must continue to work even when
+  // the optional demo corpus file is missing or temporarily unavailable.
+  wireNavigation();
 
-  if (!response.ok) {
-    throw new Error(`Could not load data/corpus.json (${response.status})`);
-  }
+  try {
+    const response = await fetch("data/corpus.json", { cache: "no-store" });
 
-  corpus = await response.json();
+    if (!response.ok) {
+      throw new Error(`Could not load data/corpus.json (${response.status})`);
+    }
 
-  if (!Array.isArray(corpus)) {
-    throw new Error("corpus.json must contain a JSON array.");
+    const loaded = await response.json();
+
+    if (!Array.isArray(loaded)) {
+      throw new Error("corpus.json must contain a JSON array.");
+    }
+
+    corpus = loaded;
+  } catch (error) {
+    console.warn("Corpus seed data unavailable; continuing with an empty corpus.", error);
+    corpus = [];
   }
 
   populateDashboard();
   renderAnalyze();
   renderInsights();
-  wireNavigation();
+
+  await findAndOfferSavedDraft();
+  draftAutosaveEnabled = true;
 }
 
 init().catch((error) => {
@@ -2424,7 +2838,7 @@ init().catch((error) => {
   document.body.insertAdjacentHTML(
     "beforeend",
     `<div style="max-width:900px;margin:30px auto;padding:20px;background:#fff;border:1px solid #ddd;border-radius:10px">
-      <strong>Corpus could not be loaded.</strong><br>
+      <strong>Application initialization error.</strong><br>
       ${escapeHtml(error.message)}
     </div>`
   );
