@@ -2125,6 +2125,11 @@ function detectProcessingRoute(file) {
 
 function renderSourcePreview(targetId) {
   const target = $(targetId);
+
+  // Some workflow versions do not render every historical preview panel.
+  // Missing optional preview containers must never block upload/OCR.
+  if (!target) return;
+
   const file = $("uploadFile").files?.[0];
 
   if (!file) {
@@ -2197,7 +2202,6 @@ async function loadSelectedFile() {
 
   $("processingRoute").textContent = detectProcessingRoute(file);
   renderSourcePreview("sourcePreview");
-  renderSourcePreview("verifySourcePreview");
   renderSourcePreview("simpleVerifySourcePreview");
   updateUploadPreview();
   scheduleDraftAutosave();
@@ -2568,7 +2572,6 @@ function resetUploadWorkflow({ clearSaved = true } = {}) {
   updateUploadPreview();
   $("processingRoute").textContent = "Awaiting file";
   renderSourcePreview("sourcePreview");
-  renderSourcePreview("verifySourcePreview");
   renderSourcePreview("simpleVerifySourcePreview");
   updateRecognitionImportStatus();
   setOcrProcessing(false);
