@@ -1046,6 +1046,8 @@ const RECORD_ID_PATTERN = /^[A-Z0-9]+(?:-[A-Z0-9]+){1,6}$/;
 let currentRecordUid = null;
 let currentFileHash = null;
 let recordSavedAt = null;
+let uploadSameFile = null;
+let demoCorpus = [];
 
 function newRecordUid() {
   return (crypto?.randomUUID?.() || `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`);
@@ -1061,10 +1063,19 @@ async function suggestRecordId({ force = false } = {}) {
   if (!force && input.dataset.auto === "0" && input.value.trim()) return;
   const prefix = recordIdPrefix();
   if (!prefix) { if (input.dataset.auto !== "0") input.value = ""; updateStoragePath(); return; }
-  const used = (await recordsAll()).filter((r) => r.record_uid !== currentRecordUid).map((r) => r.id);
-  let max = 0;
-  used.forEach((id) => { if (String(id).startsWith(prefix)) max = Math.max(max, Number(String(id).slice(prefix.length)) || 0); });
-  input.value = `${prefix}${String(max + 1).padStart(3, "0")}`;
+  if (cloudReady()) {
+    try {
+      input.value = (await recordsApi(`/api/records/next-id?prefix=${encodeURIComponent(prefix)}`)).id;
+    } catch (error) {
+      setFieldError("id", `Could not get the next ID from the team corpus: ${error.message}`);
+      return;
+    }
+  } else {
+    const used = (await recordsAll()).filter((r) => r.record_uid !== currentRecordUid).map((r) => r.id);
+    let max = 0;
+    used.forEach((id) => { if (String(id).startsWith(prefix)) max = Math.max(max, Number(String(id).slice(prefix.length)) || 0); });
+    input.value = `${prefix}${String(max + 1).padStart(3, "0")}`;
+  }
   input.dataset.auto = "1";
   clearFieldError("id");
   updateStoragePath();
@@ -1106,7 +1117,13 @@ async function validateUploadForm() {
   $("uploadDocId").value = id;
   if (!id) fail("id", "An ID is needed. Press “Suggest ID”.");
   else if (!RECORD_ID_PATTERN.test(id)) fail("id", "Use capital letters, numbers and hyphens only, e.g. P6-2026-COMP-001. No names.");
-  else {
+  else if (cloudReady()) {
+    try {
+      const chk = await recordsApi(`/api/records/check?id=${encodeURIComponent(id)}&sha256=${encodeURIComponent(currentFileHash || "")}&record_uid=${encodeURIComponent(currentRecordUid || "")}`);
+      if (chk.id_taken_by) fail("id", `${id} is already used by another record${chk.id_taken_by.deleted ? " (since deleted — IDs are never reused)" : ""}. Press “Suggest ID” for the next free one.`);
+      uploadSameFile = chk.same_file;
+    } catch (error) { fail("id", `Could not check the ID with the team corpus: ${error.message}`); }
+  } else {
     const clash = (await recordsAll()).find((r) => r.id === id && r.record_uid !== currentRecordUid);
     if (clash) fail("id", `${id} is already used by a saved record. Press “Suggest ID” for the next free one.`);
   }
@@ -1118,7 +1135,8 @@ async function validateUploadForm() {
     return false;
   }
   if (currentFileHash) {
-    const same = (await recordsAll()).find((r) => r.sha256 === currentFileHash && r.record_uid !== currentRecordUid);
+    const same = cloudReady() ? uploadSameFile
+      : (await recordsAll()).find((r) => r.sha256 === currentFileHash && r.record_uid !== currentRecordUid);
     if (same && !confirm(`This exact file was already saved as ${same.id} on ${new Date(same.saved_at).toLocaleDateString()}.\n\nProcess it again as a new record anyway?`)) return false;
   }
   return true;
@@ -1249,6 +1267,8 @@ async function saveDraftNow({ silent = false } = {}) {
 function scheduleDraftAutosave() {
   if (!draftAutosaveEnabled || restoringDraft) return;
   clearTimeout(draftAutosaveTimer);
+  // a just-saved record is not an unfinished draft (until it is edited again)
+  if (!$("recordSavedView")?.classList.contains("hidden")) return;
   setDraftSaveStatus("Changes pending…", "saving");
   draftAutosaveTimer = setTimeout(() => {
     saveDraftNow({ silent: true });
@@ -1803,6 +1823,7 @@ async function fetchPageCount(base, file, controller) {
 
   const response = await fetch(`${base}/api/page-count`, {
     method: "POST",
+    headers: await authHeaders(),
     body: form,
     signal: controller.signal
   });
@@ -1826,7 +1847,7 @@ async function processSingleOcrPage(file, pageNumber, runSerial) {
   renderOcrProgress();
 
   const form = new FormData();
-  form.append("file", file, file.name);
+  form.append("file", file, `scan${(file.name.match(/\.[a-z0-9]+$/i)?.[0] || "").toLowerCase()}`);
   form.append("page_number", String(pageNumber));
   form.append("document_id", $("uploadDocId").value.trim() || "DRAFT-001");
   form.append("source_type", $("uploadSourceType").value || "auto");
@@ -1837,6 +1858,7 @@ async function processSingleOcrPage(file, pageNumber, runSerial) {
   try {
     const response = await fetch(`${base}/api/transcribe-page`, {
       method: "POST",
+      headers: await authHeaders(),
       body: form,
       signal: controller.signal
     });
@@ -2205,13 +2227,37 @@ async function saveRecord() {
   record.created_at = record.created_at || now;
   record.saved_at = now;
   $("saveRecordBtn").disabled = true;
+  if (cloudReady()) {
+    $("saveRecordBtn").textContent = "Saving to the team corpus…";
+    try {
+      const form = new FormData();
+      form.append("record", new Blob([JSON.stringify(record)], { type: "application/json" }), "record.json");
+      const file = $("uploadFile").files?.[0];
+      if (file) form.append("source", file, `scan${(file.name.match(/\.[a-z0-9]+$/i)?.[0] || "").toLowerCase()}`);
+      const res = await recordsApi(`/api/records/${encodeURIComponent(record.record_uid)}`, { method: "PUT", form });
+      recordSavedAt = res.saved_at;
+      clearTimeout(draftAutosaveTimer);
+      await draftDbDelete().catch(() => {});
+      setDraftSaveStatus("Saved to team corpus", "saved");
+      await showRecordSaved({ ...record, storage_path: res.storage_path }, c, res.version > 1, res);
+      loadCloudCorpus();
+    } catch (error) {
+      if (error.code === "id_taken") alert(`${error.message}\n\nGo back to step 1 and press “Suggest ID”.`);
+      else alert(`Could not save to the team corpus: ${error.message}\n\nYour work is still kept in this browser. Try again, or download the JSON as a backup.`);
+      renderRecordReview();
+    } finally {
+      $("saveRecordBtn").disabled = false;
+    }
+    return;
+  }
   try {
     const previous = (await recordsAll()).find((r) => r.record_uid === record.record_uid);
     await recordPut({ record_uid: record.record_uid, id: record.id, level: record.level, year: record.year, task: record.task,
       sha256: record.source_file.sha256, words: c.words, errors: c.accepted,
       created_at: previous?.created_at || now, saved_at: now, record: { ...record, created_at: previous?.created_at || now } });
     recordSavedAt = now;
-    await draftDbDelete().catch(() => {});
+    clearTimeout(draftAutosaveTimer);
+      await draftDbDelete().catch(() => {});
     setDraftSaveStatus("Record saved", "saved");
     await showRecordSaved(record, c, Boolean(previous));
   } catch (error) {
@@ -2221,8 +2267,15 @@ async function saveRecord() {
   }
 }
 
-async function showRecordSaved(record, c, updated = false) {
-  const all = (await recordsAll()).sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)));
+async function savedRecordRows() {
+  if (cloudReady()) {
+    const { records } = await recordsApi("/api/records?include_text=false");
+    return records.map((r) => ({ ...r, cloud: true }));
+  }
+  return (await recordsAll()).sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)));
+}
+async function showRecordSaved(record, c, updated = false, cloudResult = null) {
+  const all = await savedRecordRows().catch(() => []);
   $("recordSaveView").classList.add("hidden");
   $("recordSavedView").classList.remove("hidden");
   $("recordSavedView").querySelector("h3").textContent = updated ? "Record updated" : "Record saved";
@@ -2232,17 +2285,29 @@ async function showRecordSaved(record, c, updated = false) {
     [record.source_file.pages || 1, (record.source_file.pages || 1) === 1 ? "page" : "pages"],
     [levelLabel(record.level), record.year]
   ].map(([n, l]) => `<div><strong>${escapeHtml(String(n))}</strong><span>${escapeHtml(String(l))}</span></div>`).join("");
-  $("savedRecordWhere").innerHTML = `Saved in this browser's corpus store as <code>${escapeHtml(record.storage_path)}</code>.
+  $("savedRecordWhere").innerHTML = cloudResult
+    ? `Saved to the team corpus (Google Cloud, Singapore) at <code>${escapeHtml(cloudResult.storage_path)}</code>
+       · version ${cloudResult.version}${cloudResult.scan_stored ? " · scan stored" : ""}${cloudResult.pages_stored ? ` · ${cloudResult.pages_stored} page image${cloudResult.pages_stored === 1 ? "" : "s"} stored` : ""}.
+       Everyone on the team can now see it in Analyze and Insights.`
+    : `Saved in this browser's corpus store as <code>${escapeHtml(record.storage_path)}</code>.
     Central storage isn't connected yet, so <strong>download a copy</strong> as a backup or to share it.`;
+  $("savedRecordList").closest("details").querySelector("summary").firstChild.textContent =
+    cloudResult ? "Records in the team corpus " : "Records saved on this computer ";
+  $("downloadAllRecordsBtn").textContent = cloudResult ? (cloudIsAdmin() ? "Download a backup of all records (zip)" : "") : "Download all as one JSON file";
+  $("downloadAllRecordsBtn").classList.toggle("hidden", Boolean(cloudResult) && !cloudIsAdmin());
   $("savedRecordCount").textContent = `(${all.length})`;
   $("savedRecordList").innerHTML = `<table class="saved-table small"><thead><tr><th>ID</th><th>Level</th><th>Words</th><th>Errors</th><th>Saved</th><th></th></tr></thead><tbody>
     ${all.map((r) => `<tr><td><code>${escapeHtml(r.id)}</code></td><td>${escapeHtml(r.level)}</td><td>${r.words ?? ""}</td><td>${r.errors ?? ""}</td>
       <td>${escapeHtml(new Date(r.saved_at).toLocaleString())}</td>
       <td><button type="button" class="text-button" data-download-record="${escapeHtml(r.record_uid)}">Download</button></td></tr>`).join("")}
     </tbody></table>`;
-  $("savedRecordList").querySelectorAll("[data-download-record]").forEach((b) => b.addEventListener("click", () => {
+  $("savedRecordList").querySelectorAll("[data-download-record]").forEach((b) => b.addEventListener("click", async () => {
     const r = all.find((x) => x.record_uid === b.dataset.downloadRecord);
-    if (r) downloadJson(r.record, `${r.id}.json`);
+    if (!r) return;
+    if (r.cloud) {
+      try { downloadJson(await (await recordsApi(`/api/records/${encodeURIComponent(r.record_uid)}`)).json(), `${r.id}.json`); }
+      catch (error) { alert(error.message); }
+    } else downloadJson(r.record, `${r.id}.json`);
   }));
   $("recordSavedView").scrollIntoView({ block: "start", behavior: "smooth" });
 }
@@ -2416,6 +2481,7 @@ function wireNavigation() {
   });
   $("saveRecordBtn").addEventListener("click", saveRecord);
   $("downloadAllRecordsBtn").addEventListener("click", async () => {
+    if (cloudReady()) { downloadCloudExport(); return; }
     const all = await recordsAll();
     downloadJson({ exported_at: new Date().toISOString(), records: all.map((r) => r.record) }, `corpus-records-${new Date().toISOString().slice(0, 10)}.json`);
   });
@@ -2646,6 +2712,7 @@ async function init() {
     }
 
     corpus = loaded;
+    demoCorpus = loaded;
   } catch (error) {
     console.warn("Corpus seed data unavailable; continuing with an empty corpus.", error);
     corpus = [];
@@ -2657,6 +2724,23 @@ async function init() {
 
   await findAndOfferSavedDraft();
   draftAutosaveEnabled = true;
+
+  wireCloud();
+  onCloudChange(() => { if (cloudReady()) loadCloudCorpus(); });
+  initCloud();
+}
+
+async function loadCloudCorpus() {
+  try {
+    const { records } = await recordsApi("/api/records");
+    // real records replace the demo set as soon as the team corpus has any
+    corpus = records.length ? records : demoCorpus;
+    populateDashboard();
+    renderAnalyze();
+    renderInsights();
+  } catch (error) {
+    console.warn("Could not load the team corpus", error);
+  }
 }
 
 init().catch((error) => {

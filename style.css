@@ -1597,3 +1597,34 @@ s.t-struck { color: #9aa1ad; text-decoration: line-through; text-decoration-thic
 .saved-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
 .saved-table th, .saved-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .saved-table th { color: var(--muted); font-weight: 600; }
+
+/* =========================================================
+   v0.15 — sign-in, team, upload gate
+   ========================================================= */
+.account-area { margin-left: auto; position: relative; }
+.acct-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 999px; font-size: 13px; background: #fff; cursor: pointer; list-style: none; white-space: nowrap; }
+.acct-chip::-webkit-details-marker { display: none; }
+.acct-chip.muted { color: var(--muted); cursor: default; background: var(--soft); }
+.acct-chip.warn { border-color: var(--st-open); color: #6b4a06; }
+.acct-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--g-nadai); }
+.acct-chip.warn .acct-dot { background: var(--st-open); }
+.acct-signin { padding: 7px 14px; border-radius: 999px; font-size: 13px; background: var(--dark); color: #fff; border-color: var(--dark); }
+.acct-signin:hover { background: #2a3444; }
+.acct-menu { position: relative; }
+.acct-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 290px; display: grid; gap: 8px; padding: 12px;
+  background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 30px rgba(17, 24, 39, .12); }
+.acct-pop button { text-align: left; padding: 8px 10px; font-size: 13px; }
+
+.upload-gate { max-width: 560px; margin: 26px auto; padding: 28px; text-align: center; background: #fff;
+  border: 1px solid var(--border); border-radius: 14px; line-height: 1.6; }
+.upload-gate h3 { margin: 0 0 6px; }
+.upload-gate p { color: var(--muted); margin: 0 0 16px; }
+#upload.locked .pipeline, #upload.locked .upload-step-panel, #upload.locked .draft-save-tools { display: none !important; }
+
+.team-dialog { width: min(620px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; }
+.team-dialog::backdrop { background: rgba(17, 24, 39, .35); }
+.team-dialog h2 { margin: 2px 0 4px; }
+.team-add { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin: 14px 0 6px; }
+.team-add input, .team-add select { padding: 9px 10px; }
+.team-dialog select { padding: 4px 8px; }

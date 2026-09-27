@@ -438,7 +438,7 @@ async function runErrorDetection() {
   $("annotationStatus").textContent = "Detecting…";
   try {
     const response = await fetch(`${base}/api/detect-errors`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: await authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ text, level: $("uploadLevel").value, task: $("uploadTask").value })
     });
     const payload = await response.json().catch(() => null);

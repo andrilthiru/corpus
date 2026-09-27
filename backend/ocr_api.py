@@ -33,6 +33,34 @@ from tamil_taxonomy import (CODES as TAMIL_SUBTYPE_CODES, SUBTYPES as TAMIL_SUBT
 app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.4")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
+# Optional: only signed-in team members may run OCR / detection (these calls cost money).
+# Set REQUIRE_SIGN_IN=1 and FIREBASE_PROJECT_ID once Google sign-in is live on the website.
+# Registered before CORS so that refusals still carry CORS headers.
+REQUIRE_SIGN_IN = os.getenv("REQUIRE_SIGN_IN", "0") == "1"
+_fb_request = None
+
+
+@app.middleware("http")
+async def require_sign_in(request, call_next):
+    global _fb_request
+    if REQUIRE_SIGN_IN and request.method != "OPTIONS" and request.url.path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        from google.oauth2 import id_token as _id_token
+        from google.auth.transport import requests as _ga_requests
+        header = request.headers.get("authorization", "")
+        if not header.startswith("Bearer "):
+            return JSONResponse({"detail": "Please sign in."}, status_code=401)
+        try:
+            _fb_request = _fb_request or _ga_requests.Request()
+            claims = _id_token.verify_firebase_token(header.split(" ", 1)[1], _fb_request,
+                                                     audience=os.getenv("FIREBASE_PROJECT_ID"))
+            if not claims.get("email_verified"):
+                raise ValueError("unverified")
+        except Exception:
+            return JSONResponse({"detail": "Your sign-in has expired. Please sign in again."}, status_code=401)
+    return await call_next(request)
+
+
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
 app.add_middleware(
     CORSMiddleware,
