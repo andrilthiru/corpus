@@ -1555,7 +1555,7 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
-        "version": "0.16.0",
+        "version": "0.18.0",
         "tamil_detection": _detection_status(),
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
@@ -1678,6 +1678,51 @@ async def detect_errors(payload: dict = Body(...)):
         "candidates": candidates,
         "note": "All results are candidate annotations and require human review.",
     }
+
+
+ASK_CORPUS_SYSTEM = """You are a research assistant for a Tamil learner corpus (Singapore schools, levels P4 to JC2).
+Answer the user's question ONLY from the corpus statistics given in JSON. Rules:
+- Quote the exact figures you rely on (errors per 100 words, ratios with their 95% intervals, script counts).
+- If the statistics cannot answer the question, say so plainly and say what data would be needed. Never invent numbers.
+- If the data is labelled SIMULATED, begin by saying the answer is based on simulated demo data.
+- Be practical for teachers and researchers; mention uncertainty when counts are small.
+- Answer in the language of the question (English or Tamil). At most 180 words. Plain text, no tables."""
+
+
+@app.post("/api/ask-corpus")
+async def ask_corpus(payload: dict = Body(...)):
+    """Answers a question about the corpus from aggregate statistics only (no learner text is sent)."""
+    question = str(payload.get("question", "") or "").strip()[:500]
+    summary = payload.get("summary") or {}
+    if not question:
+        raise HTTPException(status_code=400, detail="Ask a question.")
+    blob = json.dumps(summary, ensure_ascii=False)
+    if len(blob) > 60000:
+        raise HTTPException(status_code=413, detail="The statistics summary is too large.")
+    api_key = os.getenv("SARVAM_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="SARVAM_API_KEY is not configured on the server.")
+    body = {
+        "model": "sarvam-105b",
+        "messages": [{"role": "system", "content": ASK_CORPUS_SYSTEM},
+                     {"role": "user", "content": f"Corpus statistics (JSON):\n{blob}\n\nQuestion: {question}"}],
+        "temperature": 0.2, "reasoning_effort": None, "max_tokens": 3000,
+    }
+
+    def call():
+        r = httpx.post("https://api.sarvam.ai/v1/chat/completions",
+                       headers={"api-subscription-key": api_key, "Content-Type": "application/json"}, json=body, timeout=90)
+        r.raise_for_status()
+        msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
+        return (msg.get("content") or "").strip()
+
+    try:
+        answer = await run_in_threadpool(call)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Sarvam could not answer: {str(exc)[:200]}") from exc
+    if not answer:
+        raise HTTPException(status_code=502, detail="Sarvam returned an empty answer; please try again.")
+    return {"answer": answer, "model": "Sarvam-105B"}
 
 
 @app.post("/api/page-count")

@@ -337,6 +337,7 @@ function insightDetectionHtml(docs) {
 }
 
 function renderInsightsV2(tool, docs) {
+  if (tool === "intelligence") return renderIntelligence();     // intelligence.js
   if (tool === "overview") return insightOverviewHtml(docs);
   if (tool === "compare") return insightLevelsHtml();
   if (tool === "confusions") return insightConfusionsHtml(docs);

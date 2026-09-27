@@ -3,7 +3,7 @@ let corpus = [];
 let analyzeLevel = "";
 let analyzeTool = "search";
 let insightLevel = "";
-let insightTool = "overview";
+let insightTool = "intelligence";
 
 const $ = (id) => document.getElementById(id);
 
@@ -714,7 +714,7 @@ function svgLineChart(title, rows, { illustrative = false, suffix = "" } = {}) {
 function renderInsights() {
   const docs = docsFor(insightLevel);
   const v2 = renderInsightsV2(insightTool, docs);      // corpus-stats.js
-  if (v2 != null) { $("insightOutput").innerHTML = v2; return; }
+  if (v2 != null) { $("insightOutput").innerHTML = v2; if (insightTool === "intelligence") wireIntelligence(); return; }
   const words = docs.reduce((sum, d) => sum + countWords(d.text || ""), 0);
   const anns = annotationCount(docs);
 
