@@ -25,7 +25,7 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.3")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.3.1")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -1012,7 +1012,8 @@ def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
             {"role": "user", "content": error_detection_prompt(text, level, task)},
         ],
         "temperature": 0.1,
-        "max_tokens": 1800,
+        "reasoning_effort": None,
+        "max_tokens": 2400,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -1034,7 +1035,50 @@ def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
     )
     response.raise_for_status()
     body = response.json()
-    content = body["choices"][0]["message"]["content"]
+    choice = (body.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    content = message.get("content")
+
+    # Sarvam reasoning is disabled above, but keep a robust fallback for older
+    # gateway behaviour where structured-output content can still be empty.
+    if not content:
+        fallback_payload = {
+            "model": "sarvam-105b",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a conservative Tamil learner-corpus error annotator. "
+                        "Return one JSON object only with key 'candidates'."
+                    ),
+                },
+                {"role": "user", "content": error_detection_prompt(text, level, task)},
+            ],
+            "temperature": 0.1,
+            "reasoning_effort": None,
+            "max_tokens": 2400,
+            "response_format": {"type": "json_object"},
+        }
+        fallback = httpx.post(
+            "https://api.sarvam.ai/v1/chat/completions",
+            headers={
+                "api-subscription-key": api_key,
+                "Content-Type": "application/json",
+            },
+            json=fallback_payload,
+            timeout=120,
+        )
+        fallback.raise_for_status()
+        fbody = fallback.json()
+        fchoice = (fbody.get("choices") or [{}])[0]
+        content = (fchoice.get("message") or {}).get("content")
+
+    if not content:
+        raise RuntimeError(
+            "Sarvam returned no visible content. "
+            f"finish_reason={choice.get('finish_reason')!r}"
+        )
+
     parsed = json.loads(content)
     return [
         c for item in parsed.get("candidates", [])
@@ -1049,7 +1093,7 @@ def detect_errors_gemini(text: str, level: str = "", task: str = ""):
         raise RuntimeError("Google Cloud project could not be determined for Vertex AI.")
 
     location = os.getenv("VERTEX_LOCATION", "global")
-    model = os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash")
+    model = os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
 
     client = genai.Client(
         vertexai=True,
@@ -1057,15 +1101,42 @@ def detect_errors_gemini(text: str, level: str = "", task: str = ""):
         location=location,
         http_options=genai_types.HttpOptions(api_version="v1"),
     )
+    # Use response_schema rather than response_json_schema for compatibility
+    # with the google-genai version currently deployed in Cloud Run.
+    gemini_schema = {
+        "type": "OBJECT",
+        "properties": {
+            "candidates": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "learner_form": {"type": "STRING"},
+                        "category": {"type": "STRING", "enum": ERROR_CATEGORIES},
+                        "suggested_correction": {"type": "STRING"},
+                        "note": {"type": "STRING"},
+                    },
+                    "required": [
+                        "learner_form",
+                        "category",
+                        "suggested_correction",
+                        "note",
+                    ],
+                },
+            }
+        },
+        "required": ["candidates"],
+    }
+
     response = client.models.generate_content(
         model=model,
         contents=error_detection_prompt(text, level, task),
-        config={
-            "temperature": 0.1,
-            "max_output_tokens": 1800,
-            "response_mime_type": "application/json",
-            "response_json_schema": ERROR_SCHEMA,
-        },
+        config=genai_types.GenerateContentConfig(
+            temperature=0.1,
+            max_output_tokens=1800,
+            response_mime_type="application/json",
+            response_schema=gemini_schema,
+        ),
     )
     parsed = json.loads(response.text or '{"candidates":[]}')
     return [
@@ -1130,15 +1201,25 @@ def merge_error_candidates(*groups):
     return merged
 
 
+
+def vaani_runtime_status():
+    try:
+        from tamilinaiyavaani import SpellChecker  # noqa: F401
+        return {"importable": True, "error": None}
+    except Exception as exc:
+        return {"importable": False, "error": str(exc)}
+
+
 @app.get("/health")
 def health():
     return {
         "ok": True,
-        "version": "0.11.3",
+        "version": "0.11.3.1",
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
-        "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash"),
+        "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
         "vaani_detector": "tamilinayavaani 0.14",
+        "vaani_runtime": vaani_runtime_status(),
         "error_detection": "Tamilinaiya/Vaani + Sarvam + Gemini + deterministic rules",
     }
 

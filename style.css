@@ -1228,3 +1228,21 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     flex-direction: column;
   }
 }
+
+
+/* v0.11.3.1 — error engine diagnostics */
+.engine-diagnostics {
+  margin: -4px 0 12px;
+}
+.engine-diagnostics details {
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafbfc;
+}
+.engine-diagnostics pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 8px 0 0;
+  font-size: 11px;
+}

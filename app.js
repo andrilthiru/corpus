@@ -2425,6 +2425,22 @@ async function runErrorDetection() {
 
     $("errorDetectionStatus").textContent =
       `${errorCandidates.length} candidate(s) · ${engineText}`;
+
+    const failures = Object.entries(payload?.engines || {})
+      .filter(([, info]) => !info?.ok)
+      .map(([name, info]) => `${name}: ${info?.error || "unavailable"}`);
+
+    let diagnostics = $("engineDiagnostics");
+    if (!diagnostics) {
+      diagnostics = document.createElement("div");
+      diagnostics.id = "engineDiagnostics";
+      diagnostics.className = "engine-diagnostics small";
+      $("errorDetectionStatus").insertAdjacentElement("afterend", diagnostics);
+    }
+    diagnostics.innerHTML = failures.length
+      ? `<details><summary>Engine diagnostics (${failures.length})</summary><pre>${escapeHtml(failures.join("\n\n"))}</pre></details>`
+      : "";
+
     $("annotationStatus").textContent = `${errorCandidates.length} candidates`;
     renderErrorCandidates();
     scheduleDraftAutosave();
