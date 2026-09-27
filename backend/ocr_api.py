@@ -743,6 +743,7 @@ def finalise_review(records):
                 "block_confidence": r["sarvam_ocr_confidence"],
                 "confidence_band": r["confidence_band"],
                 "sarvam_block_index": r["sarvam_block_index"],
+                "block_type": r.get("block_type"),
             },
             "secondary_ocr": {
                 "engine": "google_cloud_vision",

@@ -226,43 +226,62 @@
         <div class="step-heading">
           <div>
             <h3>3. Transcription Review</h3>
-            <p class="subtext">Compare every learner-text region with the original source. Confidence and legibility are review aids only; even high-confidence OCR is not auto-accepted.</p>
+            <p class="subtext">Clear OCR (both engines agree, good confidence) goes straight into the transcript. Review only the flagged words and regions. Correct what the OCR misread; keep the learner's own mistakes. Those are annotated in Stage 4.</p>
           </div>
           <span id="reviewProgress" class="status-pill">Awaiting recognition</span>
         </div>
 
-        <div id="structuredReviewMode" class="structured-review hidden">
-          <div class="review-page-nav">
-            <button id="reviewPrevPage" type="button">← Previous page</button>
-            <strong id="reviewPageLabel">Page 1</strong>
-            <button id="reviewNextPage" type="button">Next page →</button>
-            <span class="review-nav-spacer"></span>
-            <button id="reviewZoomOut" type="button" aria-label="Zoom out">−</button>
-            <button id="reviewZoomFit" type="button">Fit</button>
-            <button id="reviewZoomIn" type="button" aria-label="Zoom in">+</button>
+        <div id="structuredReviewMode" class="structured-review s3 hidden">
+          <div class="s3-bar">
+            <div class="s3-bar-nav">
+              <button id="reviewPrevPage" type="button">← Previous</button>
+              <strong id="reviewPageLabel">Page 1</strong>
+              <button id="reviewNextPage" type="button">Next →</button>
+            </div>
+            <div id="reviewSummary" class="s3-summary small"></div>
+            <div class="s3-bar-tools">
+              <button id="reviewZoomOut" type="button" aria-label="Zoom out">−</button>
+              <button id="reviewZoomFit" type="button">Fit</button>
+              <button id="reviewZoomIn" type="button" aria-label="Zoom in">+</button>
+            </div>
           </div>
 
-          <div class="review-page-grid">
-            <div class="review-source-column">
+          <div class="s3-grid">
+            <section class="s3-panel s3-scan" aria-label="Original scan">
+              <header class="s3-panel-head"><strong>Original scan</strong><span class="small">click a region to jump to it</span></header>
               <div id="reviewPageViewport" class="review-page-viewport">
                 <div id="reviewPageStage" class="review-page-stage">
                   <div class="empty">A processed page preview will appear here.</div>
                 </div>
               </div>
-              <div class="small review-help">The active handwriting region is highlighted. Click another highlighted region to review it.</div>
-            </div>
+            </section>
 
-            <div class="review-work-column">
-              <div class="review-toolbar">
-                <div id="reviewSummary" class="small"></div>
-              </div>
-              <div id="activeReviewCard"></div>
-              <div class="page-review-heading">
-                <strong>Items on this page</strong>
-                <span id="pageReviewProgress" class="small"></span>
-              </div>
-              <div id="pageReviewQueue" class="page-review-queue"></div>
-            </div>
+            <section class="s3-panel s3-transcript-col" aria-label="Transcribed text">
+              <header class="s3-panel-head">
+                <strong>Transcribed text</strong>
+                <div class="seg">
+                  <button type="button" data-transcript-view="page" class="active">Current page</button>
+                  <button type="button" data-transcript-view="document">Full document</button>
+                </div>
+                <button id="s3CopyBtn" type="button" class="text-button">Copy</button>
+              </header>
+              <div id="s3TranscriptMeta" class="s3-meta small"></div>
+              <div id="s3Transcript" class="s3-transcript tamil"></div>
+              <footer class="s3-panel-foot small">
+                <label class="check-row inline"><input id="s3ShowExcluded" type="checkbox" /> <span>Show excluded regions</span></label>
+                <span class="s3-legend"><mark class="t-issue open">needs review</mark> <mark class="t-issue resolved corrected">OCR corrected</mark></span>
+              </footer>
+            </section>
+
+            <aside class="s3-panel s3-rail-col" aria-label="Review">
+              <header class="s3-panel-head">
+                <div class="seg small-seg">
+                  <button type="button" data-review-mode="exceptions" class="active">Exceptions</button>
+                  <button type="button" data-review-mode="all">Review all OCR regions</button>
+                </div>
+              </header>
+              <div id="s3Rail" class="s3-rail"></div>
+            </aside>
           </div>
         </div>
 
@@ -291,59 +310,54 @@
         <div class="step-heading">
           <div>
             <h3>4. Error Detection & Annotation</h3>
-            <p class="subtext">Automated suggestions are candidates only. Iyal supplies Tamil lexical evidence; a DDSpell-style ranker proposes spelling corrections; Sarvam and Gemini provide contextual analysis; deterministic rules catch basic duplicates and punctuation.</p>
+            <p class="subtext">Each underlying error appears once, with every detector's evidence. Types use the same Tamil taxonomy for automatic and manual tags. Reject as <em>Not an error</em> or <em>OCR error</em> so transcription mistakes never count as learner errors.</p>
           </div>
           <span id="annotationStatus" class="status-pill">Awaiting detection</span>
         </div>
 
-        <div class="annotation-source-panel">
-          <h4>Verified learner text</h4>
-          <textarea id="annotationSourceText" class="tamil annotation-source-text" readonly></textarea>
-          <div class="small">Tip: select a learner word or phrase above to copy it into the manual annotation form.</div>
-        </div>
-
-        <div class="annotation-ai-toolbar">
+        <div class="annotation-ai-toolbar s4-toolbar">
           <button id="runErrorDetectionBtn" type="button" class="primary-btn">Run candidate detection</button>
+          <button id="s4FeatureScan" type="button">Find proverbs &amp; features</button>
           <span id="errorDetectionStatus" class="small">No automatic scan run yet.</span>
         </div>
 
-        <div id="errorCandidateList" class="error-candidate-list"></div>
+        <div class="s4-grid">
+          <section class="s4-textcol">
+            <div class="s4-textpair">
+              <div class="s4-textbox">
+                <header><strong>Original learner text</strong><span class="small">select words to annotate</span></header>
+                <div id="s4Original" class="tamil s4-body"></div>
+              </div>
+              <div class="s4-textbox">
+                <header><strong>Corrected / annotated text</strong>
+                  <label class="check-row inline small"><input id="s4PreviewPending" type="checkbox" /> <span>preview pending</span></label></header>
+                <div id="s4Corrected" class="tamil s4-body"></div>
+              </div>
+            </div>
+            <div id="s4SelectionTools" class="s4-seltools hidden">
+              <span class="tamil s4-sel-text"></span>
+              <button id="s4AddError" type="button" class="primary-btn">+ Error</button>
+              <button id="s4AddFeature" type="button">+ Feature (பழமொழி …)</button>
+            </div>
+            <div class="s4-legend small">
+              <span class="lg g-ezhuthu">எழுத்தியல்</span><span class="lg g-sol">சொல்லியல்</span>
+              <span class="lg g-ilakkanam">இலக்கணம்</span><span class="lg g-nadai">வாக்கிய/எழுத்து நடை</span>
+              <span class="lg g-feature">மொழிக் கூறு (feature)</span>
+              <span class="lg-sep"></span>
+              <span class="lg s-pending">pending</span><span class="lg s-accepted">accepted</span>
+            </div>
+          </section>
 
-        <details class="manual-annotation-panel" open>
-          <summary><strong>+ Manual annotation</strong></summary>
-          <div class="form-grid annotation-form">
-            <label>
-              Learner form
-              <input id="annotationText" class="tamil" type="text" placeholder="Select or enter learner form" />
-            </label>
-            <label>
-              Category
-              <select id="annotationCategory">
-                <option value="SPELLING">Spelling</option>
-                <option value="GRAMMAR">Grammar</option>
-                <option value="PUNCTUATION">Punctuation</option>
-                <option value="WORD_CHOICE">Word choice</option>
-                <option value="WORD_FORM">Word form</option>
-                <option value="MISSING_WORD">Missing word</option>
-                <option value="EXTRA_WORD">Extra word</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </label>
-            <label>
-              Suggested / standard form
-              <input id="annotationSuggested" class="tamil" type="text" placeholder="Optional" />
-            </label>
-            <label>
-              Note
-              <input id="annotationNote" type="text" placeholder="Optional annotation note" />
-            </label>
-          </div>
-
-          <button id="addAnnotationBtn" type="button">Add annotation</button>
-        </details>
-
-        <h4 style="margin-top:18px">Accepted annotations</h4>
-        <div id="draftAnnotationList" class="annotation-draft-list"></div>
+          <aside class="s4-cardcol">
+            <div class="s4-filters seg">
+              <button type="button" data-a-filter="all" class="active">All <span>0</span></button>
+              <button type="button" data-a-filter="pending">Pending <span>0</span></button>
+              <button type="button" data-a-filter="accepted">Accepted <span>0</span></button>
+              <button type="button" data-a-filter="rejected">Rejected <span>0</span></button>
+            </div>
+            <div id="errorCandidateList" class="s4-cards"></div>
+          </aside>
+        </div>
 
         <div class="step-actions">
           <button type="button" data-prev-step="3">← Back</button>
@@ -523,6 +537,9 @@
   </dialog>
 
   <script src="config.js"></script>
-<script src="app.js"></script>
+  <script src="taxonomy.js"></script>
+  <script src="stage3.js"></script>
+  <script src="stage4.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
