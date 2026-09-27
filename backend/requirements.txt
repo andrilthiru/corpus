@@ -14,3 +14,10 @@ google-cloud-vision>=3.10
 
 google-genai>=1.0
 
+
+# v4 Tamil error detection (frozen prototype stack)
+transformers>=4.56.1
+wordfreq>=3.1
+tamilinayavaani>=0.13
+requests>=2.32
+google-auth>=2.35

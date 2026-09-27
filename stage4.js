@@ -18,7 +18,10 @@ let annotationItemSeq = 0;
 let annotationBaseText = null;     // the exact text error detection ran on (to spot later transcript edits)
 
 const ENGINE_LABELS = { iyal: "Iyal", ddspell_style: "DDSpell-style", sarvam: "Sarvam", gemini: "Gemini",
-                        rules: "Rules", manual: "Manual" };
+                        rules: "Tamil rules", lexicon: "Dictionary neighbour", tamilvu: "TamilVU", vaani: "Vaani",
+                        muril: "MuRIL", manual: "Manual" };
+const GATE_LABELS = { mechanical_rule: "certain rule", agreement: "2 checks agree", ai_confirmed: "Sarvam confirmed",
+                      unverified_rule: "rule · not AI-checked", ai_discovery: "AI suggestion" };
 
 function annotationText() {
   return normalizeTamilText(consolidatedVerifiedText() || $("verifiedText").value || "");
@@ -54,7 +57,9 @@ function itemsFromCandidates(candidates, text) {
   const taken = [];
   candidates.forEach((c) => {
     const occ = occurrencesOf(text, c.learner_form);
-    const free = occ.find(([s, e]) => !taken.some((t) => t.form === c.learner_form && t.s === s)) || occ[0] || null;
+    const exact = Number.isInteger(c.start) && text.slice(c.start, c.end) === c.learner_form ? [c.start, c.end] : null;
+    if (exact && !occ.some(([s]) => s === exact[0])) occ.push(exact);
+    const free = exact || occ.find(([s, e]) => !taken.some((t) => t.form === c.learner_form && t.s === s)) || occ[0] || null;
     if (free) taken.push({ form: c.learner_form, s: free[0] });
     const subtype = inferSubtype(c);
     placed.push({
@@ -69,7 +74,8 @@ function itemsFromCandidates(candidates, text) {
       evidence: (Array.isArray(c.evidence) && c.evidence.length ? c.evidence : [{
         engines: c.engines || [], category: c.category, suggested_correction: c.suggested_correction, note: c.note
       }]).map((e) => ({ ...e, subtype: e.subtype || inferSubtype({ ...c, category: e.category, suggested_correction: e.suggested_correction }) })),
-      agreement: Boolean(c.agreement)
+      agreement: Boolean(c.agreement),
+      tier: c.tier || "likely", gate_reason: c.gate_reason || null
     });
   });
   return mergeOverlappingItems(placed, text);
@@ -94,6 +100,7 @@ function mergeOverlappingItems(items, text) {
       sources: [...new Set(cl.flatMap((x) => x.sources))],
       evidence: cl.flatMap((x) => x.evidence.map((e) => ({ ...e, span: x.text }))),
       agreement: new Set(cl.flatMap((x) => x.sources.map((s) => (s === "ddspell_style" ? "iyal" : s)))).size >= 2,
+      tier: cl.some((x) => x.tier !== "possible") ? "likely" : "possible",
       merged_spans: cl.map((x) => x.text)
     };
   });
@@ -117,6 +124,8 @@ function toAnnotationRecord(item) {
     auto_subtype: item.auto_subtype || null,
     subtype_changed_by_annotator: Boolean(item.auto_subtype && item.auto_subtype !== item.subtype),
     tag_source: item.tag_source || (item.sources.includes("manual") ? "annotator" : null),
+    detection_tier: item.sources.includes("manual") ? "manual" : (item.tier || null),
+    gate_reason: item.gate_reason || null,
     tag_confidence: item.tag_confidence || null,
     subtype_options: item.subtype_options || [],
     note: item.note || "",
@@ -205,7 +214,7 @@ function cardHtml(item, n) {
   const occ = item.occurrences?.length > 1
     ? `<span class="small a-occ">occurrence ${item.occurrences.findIndex(([s]) => s === item.start) + 1} of ${item.occurrences.length}
          <button type="button" class="text-button" data-a-next-occ>next ›</button></span>` : "";
-  return `<article class="a-card g-${g.toLowerCase()} s-${item.status} ${active ? "active" : ""} ${item.stale ? "stale" : ""}" data-annotation-card="${item.id}">
+  return `<article class="a-card g-${g.toLowerCase()} s-${item.status} ${active ? "active" : ""} ${item.stale ? "stale" : ""} ${item.tier === "possible" ? "possible" : ""}" data-annotation-card="${item.id}">
     ${item.stale ? '<div class="a-stale small">No longer in the text (edited in the transcript). Not saved.</div>' : ""}
     <div class="a-card-head">
       <span class="a-num">${n}</span>
@@ -217,7 +226,9 @@ function cardHtml(item, n) {
       <span class="a-group-dot"></span>${typeSelect}
     </div>
     <div class="small a-prov">${item.sources.map((s) => `<span class="a-chip">${escapeHtml(ENGINE_LABELS[s] || s)}</span>`).join("")}
-      ${item.agreement ? '<span class="a-chip agree">independent agreement</span>' : ""}
+      ${item.tier === "possible" ? '<span class="a-chip possible">possible · AI only</span>' : ""}
+      ${item.gate_reason && item.tier !== "possible" ? `<span class="a-chip gate">${escapeHtml(GATE_LABELS[item.gate_reason] || item.gate_reason)}</span>` : ""}
+      ${item.agreement && item.gate_reason !== "agreement" ? '<span class="a-chip agree">independent agreement</span>' : ""}
       ${tagChip(item)}
       ${item.auto_subtype && item.auto_subtype !== item.subtype ? `<span class="a-chip">changed from auto: ${escapeHtml(subtypeLabel(item.auto_subtype))}</span>` : ""}
       ${item.start == null ? '<span class="a-chip warn">not found in text</span>' : ""} ${occ}</div>
@@ -434,12 +445,12 @@ async function runErrorDetection() {
 
   errorDetectionRunning = true;
   $("runErrorDetectionBtn").disabled = true;
-  $("errorDetectionStatus").textContent = "Running Iyal + DDSpell-style + Sarvam + Gemini + rules…";
+  $("errorDetectionStatus").textContent = "Checking: Tamil rules, dictionary, morphology, TamilVU, MuRIL → Sarvam verifies… (up to 2 minutes)";
   $("annotationStatus").textContent = "Detecting…";
   try {
     const response = await fetch(`${base}/api/detect-errors`, {
       method: "POST", headers: await authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ text, level: $("uploadLevel").value, task: $("uploadTask").value })
+      body: JSON.stringify({ text, level: $("uploadLevel").value, task: $("uploadTask").value, mode: "standard" })
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.detail || `Error detector returned HTTP ${response.status}`);
@@ -454,7 +465,8 @@ async function runErrorDetection() {
     annotationItems = keep.concat(fresh);
 
     const engineText = Object.entries(payload?.engines || {}).map(([n, info]) => `${ENGINE_LABELS[n] || n}: ${info.ok ? "ok" : "unavailable"}`).join(" · ");
-    $("errorDetectionStatus").textContent = `${errorCandidates.length} detector result(s) → ${fresh.length} error card(s) · ${engineText}`;
+    const hidden = Number(payload?.suppressed || 0);
+    $("errorDetectionStatus").textContent = `${fresh.length} error card(s)${hidden ? ` · ${hidden} weak flag(s) hidden (not confirmed)` : ""}${payload?.seconds ? ` · ${payload.seconds}s` : ""} · ${engineText}`;
     const failures = Object.entries(payload?.engines || {}).filter(([, i]) => !i?.ok).map(([n, i]) => `${n}: ${i?.error || "unavailable"}`);
     let diag = $("engineDiagnostics");
     if (!diag) { diag = document.createElement("div"); diag.id = "engineDiagnostics"; diag.className = "engine-diagnostics small"; $("errorDetectionStatus").insertAdjacentElement("afterend", diag); }
@@ -473,7 +485,42 @@ async function runErrorDetection() {
   }
 }
 
+/* Open-ended AI suggestions: only when the annotator asks. Shown as "possible", never mixed into the gated list. */
+let discoveryRunning = false;
+async function runDiscovery() {
+  if (discoveryRunning) return;
+  const text = annotationText().trim();
+  const base = ocrApiUrl();
+  if (!text || !base) return;
+  discoveryRunning = true;
+  const btn = $("runDiscoveryBtn");
+  btn.disabled = true; btn.textContent = "Asking AI…";
+  try {
+    const response = await fetch(`${base}/api/detect-errors`, {
+      method: "POST", headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ text, level: $("uploadLevel").value, task: $("uploadTask").value, mode: "discovery" })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+    const got = (payload?.candidates || []).map((c) => ({ ...c, tier: "possible", gate_reason: "ai_discovery", review_status: "PENDING" }));
+    const fresh = itemsFromCandidates(got, text).map((n) => ({ ...n, tier: "possible", gate_reason: "ai_discovery" }))
+      .filter((n) => !annotationItems.some((k) => k.start != null && n.start != null && n.start < k.end && n.end > k.start));
+    annotationItems = annotationItems.concat(fresh);
+    annotationBaseText = annotationBaseText || text;
+    const ok = Object.entries(payload?.engines || {}).filter(([, i]) => i.ok).map(([n]) => ENGINE_LABELS[n] || n);
+    $("errorDetectionStatus").textContent = `AI suggestions: ${fresh.length} new “possible” card(s)${ok.length ? ` from ${ok.join(" + ")}` : " — AI unavailable"}.`;
+    renderAnnotationWorkspace();
+    scheduleDraftAutosave();
+  } catch (error) {
+    $("errorDetectionStatus").textContent = `AI suggestions failed: ${error.message}`;
+  } finally {
+    discoveryRunning = false;
+    btn.disabled = false; btn.textContent = "Ask AI for more (possible errors)";
+  }
+}
+
 function wireStage4() {
+  $("runDiscoveryBtn")?.addEventListener("click", runDiscovery);
   document.querySelectorAll("[data-a-filter]").forEach((b) => b.addEventListener("click", () => {
     annotationFilter = b.dataset.aFilter; renderAnnotationCards();
   }));

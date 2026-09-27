@@ -1628,3 +1628,8 @@ s.t-struck { color: #9aa1ad; text-decoration: line-through; text-decoration-thic
 .team-add { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin: 14px 0 6px; }
 .team-add input, .team-add select { padding: 9px 10px; }
 .team-dialog select { padding: 4px 8px; }
+
+/* v0.16 detection tiers */
+.a-chip.gate { background: var(--g-nadai-bg); color: #1f5c40; }
+.a-chip.possible { background: #f1ecfb; color: #5b3f99; }
+.a-card.possible { border-style: dashed; }

@@ -19,6 +19,7 @@ import pymupdf
 import regex as re
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from PIL import Image, ImageOps
 from sarvamai import SarvamAI
 from google.cloud import vision
@@ -1554,7 +1555,8 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
-        "version": "0.11.4",
+        "version": "0.16.0",
+        "tamil_detection": _detection_status(),
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
         "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
@@ -1563,22 +1565,71 @@ def health():
             "status": iyal_runtime_status(load=False),
         },
         "ddspell_layer": "published-method reimplementation (bigram + edit distance + frequency)",
-        "error_detection": "Iyal lexical evidence + DDSpell-style ranking + Sarvam + Gemini + deterministic rules",
+        "error_detection": "v4 (frozen): Tamil rules + Hunspell/wordfreq/ThamizhiMorph validity + lexical neighbour + TamilVU ஒற்று + MuRIL(4.0) → gated, Sarvam verifies; AI discovery on request",
     }
 
 
 
 
+def _detection_status():
+    try:
+        import tamil_detect
+        return tamil_detect.status()
+    except Exception as exc:
+        return {"error": str(exc)[:200]}
+
+
+def _taxonomy_payload():
+    return {code: {"ta": v[0], "group": v[1], "group_ta": TAMIL_GROUPS[v[1]], "family_ta": v[2] or v[0]}
+            for code, v in TAMIL_SUBTYPES.items()}
+
+
 @app.post("/api/detect-errors")
 async def detect_errors(payload: dict = Body(...)):
+    """mode=standard (default): the frozen v4 detector — only gated/verified candidates reach the annotator.
+       mode=discovery: open-ended AI suggestions (Sarvam + Gemini), shown to the annotator as "possible".
+       mode=legacy: the pre-v4 behaviour, kept for comparison."""
     text = str(payload.get("text", "") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Verified learner text is required.")
+    mode = str(payload.get("mode", "standard") or "standard")
+    if mode == "standard":
+        try:
+            import tamil_detect
+            out = await run_in_threadpool(tamil_detect.detect, text)
+            candidates = []
+            for c in out["candidates"]:
+                c["category"] = SUBTYPE_TO_LEGACY.get(c.get("subtype")) or "OTHER"
+                candidates.append(assign_tag(c))
+            return {"mode": "standard", "categories": ERROR_CATEGORIES, "taxonomy": _taxonomy_payload(),
+                    "candidate_count": len(candidates), "engines": out["engines"], "suppressed": out["suppressed"],
+                    "seconds": out["seconds"], "candidates": candidates,
+                    "note": "Gated candidates only. Nothing is auto-corrected; every item needs human review."}
+        except Exception as exc:
+            print("v4 detection failed; falling back to legacy:", repr(exc))
+            mode = "legacy_fallback"
 
     level = str(payload.get("level", "") or "")
     task = str(payload.get("task", "") or "")
 
     engines = {}
+    if mode == "discovery":
+        found = []
+        for name, fn in (("sarvam", detect_errors_sarvam), ("gemini", detect_errors_gemini)):
+            try:
+                got = await run_in_threadpool(fn, text, level, task)
+                engines[name] = {"ok": True, "count": len(got), "role": "discovery"}
+                found.append(got)
+            except Exception as exc:
+                engines[name] = {"ok": False, "error": str(exc)[:300], "role": "discovery"}
+        candidates = [assign_tag(c) for c in merge_error_candidates(*found)] if found else []
+        for c in candidates:
+            c["tier"] = "possible"
+            c["gate_reason"] = "ai_discovery"
+        return {"mode": "discovery", "categories": ERROR_CATEGORIES, "taxonomy": _taxonomy_payload(),
+                "candidate_count": len(candidates), "engines": engines, "candidates": candidates,
+                "note": "Open-ended AI suggestions: lower confidence, review each one."}
+
     rules = detect_rule_candidates(text)
 
     try:
@@ -1619,9 +1670,9 @@ async def detect_errors(payload: dict = Body(...)):
     candidates = [assign_tag(c) for c in merge_error_candidates(lexical, sarvam, gemini, rules)]
 
     return {
+        "mode": mode,
         "categories": ERROR_CATEGORIES,
-        "taxonomy": {code: {"ta": v[0], "group": v[1], "group_ta": TAMIL_GROUPS[v[1]], "family_ta": v[2] or v[0]}
-                     for code, v in TAMIL_SUBTYPES.items()},
+        "taxonomy": _taxonomy_payload(),
         "candidate_count": len(candidates),
         "engines": engines,
         "candidates": candidates,
