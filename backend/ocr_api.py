@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
@@ -24,7 +25,7 @@ from google import genai
 from google.genai import types as genai_types
 import google.auth
 
-app = FastAPI(title="Themozhi Corpus OCR API", version="0.11")
+app = FastAPI(title="Themozhi Corpus OCR API", version="0.11.2.3")
 
 # Prototype setting. Restrict this to your GitHub Pages origin before production.
 allowed_origins = [x.strip() for x in os.getenv("CORPUS_ALLOWED_ORIGINS", "*").split(",") if x.strip()]
@@ -961,7 +962,12 @@ def detect_errors_gemini(text: str, level: str = "", task: str = ""):
 
 
 def normalise_candidate_span(value: str):
-    return re.sub(r"[\s\p{P}\p{S}]+", "", (value or "").normalize("NFC").casefold())
+    """
+    Normalize candidate text safely in Python before comparing spans.
+    Python strings do not have JavaScript's `.normalize()` method.
+    """
+    normalized = unicodedata.normalize("NFC", str(value or "")).casefold()
+    return re.sub(r"[\s\p{P}\p{S}]+", "", normalized)
 
 
 def merge_error_candidates(*groups):
@@ -1017,6 +1023,7 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
+        "version": "0.11.2.3",
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
         "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.5-flash"),
