@@ -1,0 +1,272 @@
+/* =========================================================
+   THEMOZHI — STAGE 3 THREE-PANEL REVIEW UI
+   UI prototype only: does not change OCR/error-detection logic.
+   ========================================================= */
+
+.themozhi-stage3-wide {
+  width: min(calc(100vw - 32px), 1540px) !important;
+  max-width: 1540px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+[data-stage3-three-panel="1"] {
+  display: grid !important;
+  grid-template-columns:
+    minmax(420px, 1.05fr)
+    minmax(390px, 0.95fr)
+    minmax(285px, 0.58fr) !important;
+  gap: 16px !important;
+  align-items: start !important;
+  width: 100% !important;
+}
+
+[data-stage3-scan-panel="1"],
+[data-stage3-review-panel="1"] {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+[data-stage3-review-panel="1"] {
+  align-self: start !important;
+}
+
+/* Keep the existing review UI compact */
+[data-stage3-review-panel="1"] textarea {
+  min-height: 72px !important;
+  max-height: 120px !important;
+}
+
+[data-stage3-review-panel="1"] button {
+  min-height: 36px;
+}
+
+[data-stage3-review-panel="1"] > * {
+  max-width: 100%;
+}
+
+/* Middle transcript panel */
+.stage3-transcript-panel {
+  background: #fff;
+  border: 1px solid #dde3ea;
+  border-radius: 12px;
+  min-width: 0;
+  overflow: hidden;
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 150px);
+  display: flex;
+  flex-direction: column;
+}
+
+.stage3-transcript-head {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #e8ecf1;
+  background: #fbfcfe;
+}
+
+.stage3-transcript-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stage3-transcript-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #172033;
+}
+
+.stage3-transcript-count {
+  font-size: 11px;
+  color: #667085;
+  white-space: nowrap;
+}
+
+.stage3-transcript-sub {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #667085;
+}
+
+.stage3-transcript-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.stage3-transcript-tabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #f0f3f7;
+}
+
+.stage3-transcript-tab,
+.stage3-copy-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  color: #596579;
+}
+
+.stage3-transcript-tab.active {
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(16,24,40,.08);
+  font-weight: 600;
+}
+
+.stage3-copy-btn {
+  border: 1px solid #d8dee8;
+  background: #fff;
+  color: #344054;
+}
+
+.stage3-transcript-body {
+  min-height: 430px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.stage3-transcript-empty {
+  border: 1px dashed #d7dde6;
+  border-radius: 10px;
+  padding: 20px 14px;
+  text-align: center;
+  color: #7a8699;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #fafbfc;
+}
+
+.stage3-page-block + .stage3-page-block {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid #edf0f4;
+}
+
+.stage3-page-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 700;
+  color: #7a8699;
+  margin-bottom: 8px;
+}
+
+.stage3-segment {
+  position: relative;
+  margin: 0 0 9px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #f7f9fc;
+  border-left: 3px solid #cbd5e1;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: #1f2937;
+}
+
+.stage3-segment.is-current {
+  background: #fff9e9;
+  border-left-color: #d4a72c;
+}
+
+.stage3-segment-id {
+  display: block;
+  margin-bottom: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  color: #8a94a6;
+}
+
+.stage3-current-edit {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #e8d898;
+  border-radius: 9px;
+  background: #fffaf0;
+}
+
+.stage3-current-edit-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8a6b12;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.stage3-current-edit-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #332a13;
+  white-space: pre-wrap;
+}
+
+.stage3-transcript-foot {
+  padding: 9px 14px;
+  border-top: 1px solid #e8ecf1;
+  color: #667085;
+  font-size: 10px;
+  background: #fbfcfe;
+}
+
+/* Slightly reduce the visual weight of the old review card */
+[data-stage3-review-panel="1"] {
+  font-size: 13px;
+}
+[data-stage3-review-panel="1"] h1,
+[data-stage3-review-panel="1"] h2,
+[data-stage3-review-panel="1"] h3,
+[data-stage3-review-panel="1"] h4 {
+  margin-top: 0;
+}
+
+/* Responsive fallbacks */
+@media (max-width: 1250px) {
+  [data-stage3-three-panel="1"] {
+    grid-template-columns: minmax(420px, 1fr) minmax(360px, .9fr) !important;
+  }
+  .stage3-transcript-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  [data-stage3-review-panel="1"] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .themozhi-stage3-wide {
+    width: min(calc(100vw - 20px), 100%) !important;
+  }
+  [data-stage3-three-panel="1"] {
+    grid-template-columns: 1fr !important;
+  }
+  .stage3-transcript-panel,
+  [data-stage3-review-panel="1"] {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    position: static !important;
+    max-height: none !important;
+  }
+  .stage3-transcript-body {
+    min-height: 260px;
+    max-height: 480px;
+  }
+}
+/* END THEMOZHI — STAGE 3 THREE-PANEL REVIEW UI */
