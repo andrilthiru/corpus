@@ -86,33 +86,7 @@ function switchSection(section) {
 }
 
 function populateDashboard() {
-  $("statDocs").textContent = corpus.length;
-  $("statWords").textContent = corpus
-    .reduce((sum, d) => sum + countWords(d.text || ""), 0)
-    .toLocaleString();
-  $("statAnnotations").textContent = annotationCount(corpus);
-  $("statLevels").textContent = new Set(corpus.map((d) => d.level).filter(Boolean)).size;
-
-  const levels = ["P4", "P6", "SEC2", "SEC4", "JC1", "JC2"];
-  $("levelBreakdown").innerHTML = levels.map((level) => {
-    const n = corpus.filter((d) => d.level === level).length;
-    return `<div class="metric-row"><span>${levelLabel(level)}</span><span>${n}</span></div>`;
-  }).join("");
-
-  const categories = {};
-  corpus.forEach((doc) => {
-    (doc.annotations || []).forEach((a) => {
-      const key = a.category || "Uncategorised";
-      categories[key] = (categories[key] || 0) + 1;
-    });
-  });
-
-  const sorted = Object.entries(categories).sort((a, b) => b[1] - a[1]);
-  $("annotationBreakdown").innerHTML = sorted.length
-    ? sorted.map(([name, n]) =>
-        `<div class="metric-row"><span>${escapeHtml(name)}</span><span>${n}</span></div>`
-      ).join("")
-    : '<div class="empty">No annotation categories yet.</div>';
+  renderDashboardV2();       // corpus-stats.js: Tamil taxonomy, rates per 100 words, coverage
 }
 
 function updateAnalyzeStats() {
@@ -122,7 +96,7 @@ function updateAnalyzeStats() {
   $("analyzeWords").textContent = docs
     .reduce((sum, d) => sum + countWords(d.text || ""), 0)
     .toLocaleString();
-  $("analyzeAnnotations").textContent = annotationCount(docs);
+  $("analyzeAnnotations").textContent = errorsOf(docs).length;
 }
 
 function getMatchingDocs(docs, query) {
@@ -563,7 +537,7 @@ function renderAnnotationsTool(docs, query) {
             <th>Level</th>
             <th>Topic</th>
             <th>Learner form</th>
-            <th>Category</th>
+            <th>Error type</th>
             <th>Suggested / standard form</th>
             <th>Note</th>
           </tr>
@@ -579,7 +553,7 @@ function renderAnnotationsTool(docs, query) {
               <td>${escapeHtml(levelLabel(doc.level))}</td>
               <td>${escapeHtml(topicLabel(doc))}</td>
               <td class="tamil">${escapeHtml(a.text || "—")}</td>
-              <td>${escapeHtml(a.category || "Uncategorised")}</td>
+              <td><span class="lg g-${annGroup(a).toLowerCase()} tamil">${escapeHtml(TAMIL_SUBTYPES[annSubtype(a)]?.ta || "—")}</span></td>
               <td class="tamil">${escapeHtml(a.suggested || "—")}</td>
               <td>${escapeHtml(a.note || "—")}</td>
             </tr>
@@ -658,9 +632,11 @@ function renderAnalyze() {
   else if (analyzeTool === "texts") html = renderTextsTool(docs, query);
   else if (analyzeTool === "annotations") html = renderAnnotationsTool(docs, query);
   else if (analyzeTool === "texttypes") html = renderTextTypeTool(docs, query);
+  else if (analyzeTool === "errors") html = renderErrorConcordanceTool(docs, query);
   else html = '<div class="empty">Unknown analysis tool.</div>';
 
   $("analyzeOutput").innerHTML = html;
+  if (analyzeTool === "errors") wireErrorConcordance(renderAnalyze);
 }
 
 
@@ -737,6 +713,8 @@ function svgLineChart(title, rows, { illustrative = false, suffix = "" } = {}) {
 
 function renderInsights() {
   const docs = docsFor(insightLevel);
+  const v2 = renderInsightsV2(insightTool, docs);      // corpus-stats.js
+  if (v2 != null) { $("insightOutput").innerHTML = v2; return; }
   const words = docs.reduce((sum, d) => sum + countWords(d.text || ""), 0);
   const anns = annotationCount(docs);
 
@@ -912,15 +890,16 @@ window.openDocument = function (id) {
     ${d.prompt ? `<br><strong>Prompt:</strong> <span class="tamil">${escapeHtml(d.prompt)}</span>` : ""}
   `;
 
-  $("dialogText").textContent = d.text || "";
+  $("dialogText").innerHTML = annotatedTextHtml(d);
 
-  const annotations = d.annotations || [];
+  const annotations = learnerErrors(d);
 
   $("dialogAnnotations").innerHTML = annotations.length
     ? annotations.map((a) => `
         <div class="annotation">
           <strong class="tamil">${escapeHtml(a.text || "")}</strong>
-          <div class="small">Category: ${escapeHtml(a.category || "Uncategorised")}</div>
+          <div class="small"><span class="lg g-${annGroup(a).toLowerCase()} tamil">${escapeHtml(TAMIL_SUBTYPES[annSubtype(a)]?.ta || "")}</span>
+            ${escapeHtml(TAMIL_SUBTYPES[annSubtype(a)]?.en || "")}</div>
           ${a.suggested
             ? `<div class="small">Suggested form: <span class="tamil">${escapeHtml(a.suggested)}</span></div>`
             : ""}
@@ -2260,6 +2239,7 @@ async function saveRecord() {
       await draftDbDelete().catch(() => {});
     setDraftSaveStatus("Record saved", "saved");
     await showRecordSaved(record, c, Boolean(previous));
+    loadLocalCorpus();
   } catch (error) {
     alert(`Could not save the record in this browser: ${error.message}\n\nDownload the JSON as a backup instead.`);
   } finally {
@@ -2728,6 +2708,16 @@ async function init() {
   wireCloud();
   onCloudChange(() => { if (cloudReady()) loadCloudCorpus(); });
   initCloud();
+  if (!cloudConfigured()) loadLocalCorpus();
+}
+
+// Local mode: records saved in this browser feed Dashboard / Analyze / Insights (the sample set until there are any)
+async function loadLocalCorpus() {
+  const saved = (await recordsAll()).map((r) => r.record).filter(Boolean);
+  corpus = saved.length ? saved : demoCorpus;
+  populateDashboard();
+  renderAnalyze();
+  renderInsights();
 }
 
 async function loadCloudCorpus() {

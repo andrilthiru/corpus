@@ -1,70 +1,766 @@
 [
-  {
-    "id": "P4-001",
-    "level": "P4",
-    "year": "2025",
-    "task": "Composition",
-    "title": "என் குடும்பம்",
-    "text": "என் குடும்பத்தில் நான்கு பேர் இருக்கிறார்கள். நாங்கள் வார இறுதியில் ஒன்றாக பூங்காவிற்கு செல்வோம்.",
-    "annotations": []
-  },
-  {
-    "id": "P6-001",
-    "level": "P6",
-    "year": "2025",
-    "task": "Composition",
-    "title": "பள்ளி நாள்",
-    "text": "நான் காலை சீக்கிரம் எழுந்து பள்ளிக்கு போனேன். என் நண்பர்களுடன் சேர்ந்து பாடங்களைப் படித்தேன்.",
-    "annotations": [
-      {
-        "text": "போனேன்",
-        "category": "Usage",
-        "suggested": "சென்றேன்",
-        "note": "Example annotation for prototype demonstration."
-      }
-    ]
-  },
-  {
-    "id": "SEC2-001",
-    "level": "SEC2",
-    "year": "2025",
-    "task": "Composition",
-    "title": "ஒரு மறக்க முடியாத நாள்",
-    "text": "கடந்த வாரம் எங்கள் வகுப்பு அறிவியல் மையத்திற்குச் சென்றது. அங்கு பல புதிய விஷயங்களை கற்றுக்கொண்டோம்.",
-    "annotations": []
-  },
-  {
-    "id": "SEC4-001",
-    "level": "SEC4",
-    "year": "2025",
-    "task": "Reflective Writing",
-    "title": "நட்பின் முக்கியத்துவம்",
-    "text": "நல்ல நண்பர்கள் நமக்கு உதவுவதோடு மட்டுமல்லாமல் தவறுகளை உணரவும் உதவுகிறார்கள்.",
-    "annotations": []
-  },
-  {
-    "id": "JC1-001",
-    "level": "JC1",
-    "year": "2025",
-    "task": "Argumentative Writing",
-    "title": "தொழில்நுட்பமும் கல்வியும்",
-    "text": "தொழில்நுட்பம் கல்வியில் பல வாய்ப்புகளை உருவாக்கியுள்ளது. இருப்பினும் அதை பொறுப்புடன் பயன்படுத்த வேண்டும்.",
-    "annotations": [
-      {
-        "text": "பொறுப்புடன்",
-        "category": "Vocabulary",
-        "suggested": "",
-        "note": "Example lexical annotation."
-      }
-    ]
-  },
-  {
-    "id": "JC2-001",
-    "level": "JC2",
-    "year": "2025",
-    "task": "Expository Writing",
-    "title": "சமூகப் பொறுப்பு",
-    "text": "ஒரு சமூகத்தின் வளர்ச்சிக்கு தனிநபரின் பங்களிப்பு அவசியமானது. ஒவ்வொருவரும் தமது பொறுப்பை உணர வேண்டும்.",
-    "annotations": []
-  }
+ {
+  "id": "SAMPLE-QA1",
+  "level": "P6",
+  "year": "2026",
+  "task": "Composition",
+  "topic": "School",
+  "title": "பள்ளித் தோட்டம் (QA test)",
+  "text": "கலை ஏழு மணிக்கு லதா பள்ளிக்கு வந்தான். அவள் கையில் ஒரு புத்தகம் மற்றும் தண்ணீர் குடுவை இருந்தது. பள்ளித் தோடத்தில் மாணவர்கள் இரண்டு மரம் நட்டனர். அங்கே ஒரு வாலை மரமும் சில பூச்செடிகளும் இருந்தது. மலர்களின் மனம் மிகவும் இனிமையாக இருந்தது.\nஆசிரியர் ஒரு மரம அருகில் நின்றார். அவர் உலர்ந்த கிளையை அருத்தார். மரம் கிளையில் இருந்த பறவை உடனே பறந்து சென்றது. பின்னர், “செடிகளுக்கு நேர் ஊற்றுங்கள்,” என்று கூறினார். மீனா ஒரு செடிக்கு தண்ணீர் குடித்தாள். நான் நான் மற்ற செடிகளை கவனித்தேன். அவள் வேகமாக ஓடுதல் குடுவையை எடுத்துவந்தாள்.\nநேற்று எங்கள் ஆசிரியர் தோட்டத்துக்கு வருகிறார். அவர், “நீங்கள் நன்றாக வேலை செய்தாய்,” என்று பாராட்டினார். நாங்கள் பூக்களை அழகான பார்த்தோம். பிறகு சில பூக்களை பார்த்தோம். வேலை முடிந்ததும் வகுப்பறை திரும்பினோம். என் நண்பன் பள்ளிக்கு பேருந்தில். மழை பெய்ததால் ஆனால் விளையாட்டு நடைபெறவில்லை.\nமாலை நேரத்தில் எல்லோரும் மகிழ்ச்சியாக இருந்தோம்,, நான் ஒரு புத்த கத்தை வீட்டிற்கு எடுத்துச் சென்றேன்.. அடுத்த நாள் மீண்டும் தோட்டத்தைப் பராமரிக்க வருவோம் என்று ஆசிரியரிடம் கூறினோம்.",
+  "annotations": [
+   {
+    "kind": "error",
+    "text": "கலை",
+    "start": 0,
+    "end": 3,
+    "suggested": "காலை",
+    "subtype": "KURIL",
+    "subtype_ta": "குறில்–நெடில் பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "குறில்–நெடில் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "வந்தான்",
+    "start": 30,
+    "end": 37,
+    "suggested": "வந்தாள்",
+    "subtype": "PGN",
+    "subtype_ta": "பால்/திணை/எண்/நபர் இயைபுப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "பால் / எழுவாய்–பயனிலை இயைபுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "தோடத்தில்",
+    "start": 105,
+    "end": 114,
+    "suggested": "தோட்டத்தில்",
+    "subtype": "OTTRU",
+    "subtype_ta": "ஒற்றுப் பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "ஒற்றுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "இரண்டு மரம்",
+    "start": 125,
+    "end": 136,
+    "suggested": "இரண்டு மரங்கள்",
+    "subtype": "NUMBER",
+    "subtype_ta": "ஒருமை–பன்மைப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "ஒருமை–பன்மைப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "வாலை",
+    "start": 156,
+    "end": 160,
+    "suggested": "வாழை",
+    "subtype": "LLZH",
+    "subtype_ta": "ல/ள/ழ பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "ல / ள / ழ எழுத்துப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "இருந்தது",
+    "start": 186,
+    "end": 194,
+    "suggested": "இருந்தன",
+    "subtype": "SV_AGR",
+    "subtype_ta": "எழுவாய்–பயனிலை இயைபுப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "எண் இயைபுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "மனம்",
+    "start": 206,
+    "end": 210,
+    "suggested": "மணம்",
+    "subtype": "NNN",
+    "subtype_ta": "ந/ன/ண பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "ந / ன / ண எழுத்துப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "மரம",
+    "start": 251,
+    "end": 254,
+    "suggested": "மரம்",
+    "subtype": "PULLI",
+    "subtype_ta": "புள்ளிப் பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "புள்ளிப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "அருத்தார்",
+    "start": 293,
+    "end": 302,
+    "suggested": "அறுத்தார்",
+    "subtype": "RR",
+    "subtype_ta": "ர/ற பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "ர / ற எழுத்துப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "மரம் கிளையில்",
+    "start": 304,
+    "end": 317,
+    "suggested": "மரக்கிளையில்",
+    "subtype": "PUNAR",
+    "subtype_ta": "புணர்ச்சிப் பிழை",
+    "group": "SOL",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "புணர்ச்சிப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "நேர்",
+    "start": 373,
+    "end": 377,
+    "suggested": "நீர்",
+    "subtype": "UYIR",
+    "subtype_ta": "உயிர்க்குறிப் பிழை",
+    "group": "EZHUTHU",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "உயிர்க்குறிப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "குடித்தாள்",
+    "start": 433,
+    "end": 443,
+    "suggested": "ஊற்றினாள்",
+    "subtype": "WCHOICE",
+    "subtype_ta": "சொல் தேர்வுப் பிழை",
+    "group": "SOL",
+    "category": "WORD_CHOICE",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "சொல் தேர்வுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "நான் நான்",
+    "start": 445,
+    "end": 454,
+    "suggested": "நான்",
+    "subtype": "EXTRA",
+    "subtype_ta": "மிகைச் சொல் பிழை",
+    "group": "NADAI",
+    "category": "EXTRA_WORD",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "தேவையற்ற / மிகைச் சொல்"
+   },
+   {
+    "kind": "error",
+    "text": "ஓடுதல்",
+    "start": 492,
+    "end": 498,
+    "suggested": "ஓடி",
+    "subtype": "WFORM",
+    "subtype_ta": "சொல் வடிவப் பிழை",
+    "group": "SOL",
+    "category": "WORD_FORM",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "சொல் வடிவப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "வருகிறார்",
+    "start": 561,
+    "end": 570,
+    "suggested": "வந்தார்",
+    "subtype": "TENSE",
+    "subtype_ta": "காலப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "காலப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "செய்தாய்",
+    "start": 599,
+    "end": 607,
+    "suggested": "செய்தீர்கள்",
+    "subtype": "PGN",
+    "subtype_ta": "பால்/திணை/எண்/நபர் இயைபுப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "நபர் / எண் இயைபுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "பூக்களை அழகான பார்த்தோம்",
+    "start": 638,
+    "end": 662,
+    "suggested": "அழகான பூக்களைப் பார்த்தோம்",
+    "subtype": "ORDER",
+    "subtype_ta": "சொல் வரிசைப் பிழை",
+    "group": "NADAI",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "சொல் வரிசைப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "வகுப்பறை திரும்பினோம்",
+    "start": 711,
+    "end": 732,
+    "suggested": "வகுப்பறைக்குத் திரும்பினோம்",
+    "subtype": "CASE",
+    "subtype_ta": "வேற்றுமை உருபுப் பிழை",
+    "group": "SOL",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "வேற்றுமை உருபுப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "என் நண்பன் பள்ளிக்கு பேருந்தில்.",
+    "start": 734,
+    "end": 766,
+    "suggested": "என் நண்பன் பள்ளிக்குப் பேருந்தில் சென்றான்.",
+    "subtype": "MISSING",
+    "subtype_ta": "சொல் விடுபட்ட பிழை",
+    "group": "NADAI",
+    "category": "MISSING_WORD",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "சொல் விடுபட்ட பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "மழை பெய்ததால் ஆனால் விளையாட்டு நடைபெறவில்லை.",
+    "start": 767,
+    "end": 811,
+    "suggested": "மழை பெய்ததால் விளையாட்டு நடைபெறவில்லை.",
+    "subtype": "CONSTR",
+    "subtype_ta": "தொடரமைப்புப் பிழை",
+    "group": "ILAKKANAM",
+    "category": "GRAMMAR",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "தொடரமைப்புப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": ",,",
+    "start": 859,
+    "end": 861,
+    "suggested": ",",
+    "subtype": "PUNCT",
+    "subtype_ta": "நிறுத்தற்குறிப் பிழை",
+    "group": "NADAI",
+    "category": "PUNCTUATION",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "நிறுத்தற்குறிப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "புத்த கத்தை",
+    "start": 871,
+    "end": 882,
+    "suggested": "புத்தகத்தை",
+    "subtype": "SPACE",
+    "subtype_ta": "இடைவெளிப் பிழை",
+    "group": "NADAI",
+    "category": "SPELLING",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "இடைவெளிப் பிழை"
+   },
+   {
+    "kind": "error",
+    "text": "..",
+    "start": 912,
+    "end": 914,
+    "suggested": ".",
+    "subtype": "PUNCT",
+    "subtype_ta": "நிறுத்தற்குறிப் பிழை",
+    "group": "NADAI",
+    "category": "PUNCTUATION",
+    "origin": "learner_error",
+    "tag_source": "answer_key",
+    "source": "answer_key",
+    "note": "நிறுத்தற்குறிப் பிழை"
+   }
+  ],
+  "annotation_review": [
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "KURIL"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "PGN"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "OTTRU"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "NUMBER"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "LLZH"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "SV_AGR"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "NNN"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "lexicon",
+     "rules"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "PULLI"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "RR"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "PUNAR"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "UYIR"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "manual"
+    ],
+    "gate_reason": null,
+    "tier": null,
+    "subtype": "WCHOICE"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "mechanical_rule",
+    "tier": "likely",
+    "subtype": "EXTRA"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "WFORM"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "TENSE"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "PGN"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "ORDER"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "CASE"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "MISSING"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "CONSTR"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "mechanical_rule",
+    "tier": "likely",
+    "subtype": "PUNCT"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "SPACE"
+   },
+   {
+    "kind": "error",
+    "status": "accepted",
+    "origin": "learner_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "mechanical_rule",
+    "tier": "likely",
+    "subtype": "PUNCT"
+   },
+   {
+    "kind": "error",
+    "status": "rejected",
+    "origin": "not_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "OTTRU"
+   },
+   {
+    "kind": "error",
+    "status": "rejected",
+    "origin": "not_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "OTTRU"
+   },
+   {
+    "kind": "error",
+    "status": "rejected",
+    "origin": "not_error",
+    "sources": [
+     "rules",
+     "tamilvu"
+    ],
+    "gate_reason": "agreement",
+    "tier": "likely",
+    "subtype": "OTTRU"
+   },
+   {
+    "kind": "error",
+    "status": "rejected",
+    "origin": "not_error",
+    "sources": [
+     "rules"
+    ],
+    "gate_reason": "unverified_rule",
+    "tier": "likely",
+    "subtype": "MISSING"
+   }
+  ],
+  "sample": true,
+  "sample_note": "QA test script with its answer key; detection history from the v4 detector run offline (without Sarvam/MuRIL)."
+ },
+ {
+  "id": "SAMPLE-CLEAN-A",
+  "level": "P6",
+  "year": "2026",
+  "task": "Composition",
+  "topic": "School",
+  "title": "பள்ளித் தோட்டம் (corrected)",
+  "text": "காலை ஏழு மணிக்கு லதா பள்ளிக்கு வந்தாள். அவள் கையில் ஒரு புத்தகம் மற்றும் தண்ணீர் குடுவை இருந்தது. பள்ளித் தோட்டத்தில் மாணவர்கள் இரண்டு மரங்கள் நட்டனர். அங்கே ஒரு வாழை மரமும் சில பூச்செடிகளும் இருந்தன. மலர்களின் மணம் மிகவும் இனிமையாக இருந்தது.\nஆசிரியர் ஒரு மரம் அருகில் நின்றார். அவர் உலர்ந்த கிளையை அறுத்தார். மரக்கிளையில் இருந்த பறவை உடனே பறந்து சென்றது. பின்னர், “செடிகளுக்கு நீர் ஊற்றுங்கள்,” என்று கூறினார். மீனா ஒரு செடிக்குத் தண்ணீர் ஊற்றினாள். நான் மற்ற செடிகளைக் கவனித்தேன். அவள் வேகமாக ஓடி குடுவையை எடுத்துவந்தாள்.\nநேற்று எங்கள் ஆசிரியர் தோட்டத்துக்கு வந்தார். அவர், “நீங்கள் நன்றாக வேலை செய்தீர்கள்,” என்று பாராட்டினார். நாங்கள் அழகான பூக்களைப் பார்த்தோம். பிறகு சில பூக்களைப் பார்த்தோம். வேலை முடிந்ததும் வகுப்பறைக்குத் திரும்பினோம். என் நண்பன் பள்ளிக்குப் பேருந்தில் சென்றான். மழை பெய்ததால் விளையாட்டு நடைபெறவில்லை.\nமாலை நேரத்தில் எல்லோரும் மகிழ்ச்சியாக இருந்தோம், நான் ஒரு புத்தகத்தை வீட்டிற்கு எடுத்துச் சென்றேன். அடுத்த நாள் மீண்டும் தோட்டத்தைப் பராமரிக்க வருவோம் என்று ஆசிரியரிடம் கூறினோம்.",
+  "annotations": [],
+  "annotation_review": [],
+  "sample": true,
+  "sample_note": "QA test script with its answer key; detection history from the v4 detector run offline (without Sarvam/MuRIL)."
+ },
+ {
+  "id": "SAMPLE-CLEAN-B",
+  "level": "P6",
+  "year": "2026",
+  "task": "Composition",
+  "topic": "School",
+  "title": "என் பள்ளி (clean)",
+  "text": "என் பெயர் கவிதா. நான் சிங்கப்பூரில் உள்ள ஒரு தொடக்கப்பள்ளியில் ஆறாம் வகுப்பில் படிக்கிறேன். ஒவ்வொரு நாளும் காலையில் என் அம்மா எனக்குச் சுவையான உணவு சமைத்துத் தருவார். நான் பேருந்தில் பள்ளிக்குச் செல்வேன். வகுப்பில் எங்கள் ஆசிரியர் தமிழ்ப் பாடங்களை மிகவும் சுவாரசியமாகக் கற்பிப்பார். இடைவேளையின்போது நானும் என் தோழிகளும் நூலகத்துக்குச் சென்று கதைப் புத்தகங்களைப் படிப்போம். மாலையில் வீட்டுக்குத் திரும்பியதும் வீட்டுப்பாடங்களைச் செய்து முடிப்பேன். வார இறுதியில் என் குடும்பத்தினருடன் கடற்கரைக்குச் செல்வது எனக்கு மிகவும் பிடிக்கும். அங்கே நாங்கள் மணலில் விளையாடி மகிழ்வோம். நேற்று மழை பெய்ததால் நாங்கள் வீட்டிலேயே இருந்தோம்.",
+  "annotations": [],
+  "annotation_review": [],
+  "sample": true,
+  "sample_note": "QA test script with its answer key; detection history from the v4 detector run offline (without Sarvam/MuRIL)."
+ },
+ {
+  "id": "P4-001",
+  "level": "P4",
+  "year": "2025",
+  "task": "Composition",
+  "title": "என் குடும்பம்",
+  "text": "என் குடும்பத்தில் நான்கு பேர் இருக்கிறார்கள். நாங்கள் வார இறுதியில் ஒன்றாக பூங்காவிற்கு செல்வோம்.",
+  "annotations": [],
+  "sample": true
+ },
+ {
+  "id": "P6-001",
+  "level": "P6",
+  "year": "2025",
+  "task": "Composition",
+  "title": "பள்ளி நாள்",
+  "text": "நான் காலை சீக்கிரம் எழுந்து பள்ளிக்கு போனேன். என் நண்பர்களுடன் சேர்ந்து பாடங்களைப் படித்தேன்.",
+  "annotations": [
+   {
+    "text": "போனேன்",
+    "category": "Usage",
+    "suggested": "சென்றேன்",
+    "note": "Example annotation for prototype demonstration."
+   }
+  ],
+  "sample": true
+ },
+ {
+  "id": "SEC2-001",
+  "level": "SEC2",
+  "year": "2025",
+  "task": "Composition",
+  "title": "ஒரு மறக்க முடியாத நாள்",
+  "text": "கடந்த வாரம் எங்கள் வகுப்பு அறிவியல் மையத்திற்குச் சென்றது. அங்கு பல புதிய விஷயங்களை கற்றுக்கொண்டோம்.",
+  "annotations": [],
+  "sample": true
+ },
+ {
+  "id": "SEC4-001",
+  "level": "SEC4",
+  "year": "2025",
+  "task": "Reflective Writing",
+  "title": "நட்பின் முக்கியத்துவம்",
+  "text": "நல்ல நண்பர்கள் நமக்கு உதவுவதோடு மட்டுமல்லாமல் தவறுகளை உணரவும் உதவுகிறார்கள்.",
+  "annotations": [],
+  "sample": true
+ },
+ {
+  "id": "JC1-001",
+  "level": "JC1",
+  "year": "2025",
+  "task": "Argumentative Writing",
+  "title": "தொழில்நுட்பமும் கல்வியும்",
+  "text": "தொழில்நுட்பம் கல்வியில் பல வாய்ப்புகளை உருவாக்கியுள்ளது. இருப்பினும் அதை பொறுப்புடன் பயன்படுத்த வேண்டும்.",
+  "annotations": [
+   {
+    "text": "பொறுப்புடன்",
+    "category": "Vocabulary",
+    "suggested": "",
+    "note": "Example lexical annotation."
+   }
+  ],
+  "sample": true
+ },
+ {
+  "id": "JC2-001",
+  "level": "JC2",
+  "year": "2025",
+  "task": "Expository Writing",
+  "title": "சமூகப் பொறுப்பு",
+  "text": "ஒரு சமூகத்தின் வளர்ச்சிக்கு தனிநபரின் பங்களிப்பு அவசியமானது. ஒவ்வொருவரும் தமது பொறுப்பை உணர வேண்டும்.",
+  "annotations": [],
+  "sample": true
+ }
 ]

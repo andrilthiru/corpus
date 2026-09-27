@@ -289,6 +289,9 @@ def summary_of(rec: dict, prev: Optional[dict], user: dict, version: int) -> dic
         "source_type": rec.get("source_type", ""),
         "text": rec.get("text", ""),
         "annotations": annotations,
+        # compact detection history (accepted / rejected / missed) for the Detection Quality insight
+        "detection": [{k: r.get(k) for k in ("kind", "status", "origin", "sources", "gate_reason", "tier", "subtype")}
+                      for r in (rec.get("annotation_review") or []) if isinstance(r, dict)],
         "words": len(str(rec.get("text", "")).split()),
         "errors": len(annotations),
         "pages": (rec.get("source_file") or {}).get("pages"),

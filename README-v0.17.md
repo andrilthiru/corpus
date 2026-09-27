@@ -1,0 +1,22 @@
+# v0.17: Dashboard, Analyze and Insights on the Tamil taxonomy
+
+- **Throughout:** errors are counted with the Tamil taxonomy (4 groups plus sub-types, in the same colours as step 4) and are normalised **per 100 words**. The invented "illustrative" numbers are gone. Rates based on fewer than 150 words are greyed out and marked *few words*.
+- **Dashboard:**
+  - error rate per level, split by group
+  - error types by group, with their sub-types
+  - corpus coverage matrix (level × task, so gaps are visible)
+  - recently saved records
+- **Analyze → Error Concordance:**
+  - every learner error in its sentence (learner form → correction)
+  - filters: group, type, task, year, plus the level tabs
+  - **CSV export** for research
+- **Insights:**
+  - **Overview**
+  - **Error Types:** each group with its sub-types
+  - **Levels & Tasks:** error profiles from P4 to JC2, and by task type
+  - **Confusions:** letter-level changes such as ல → ழ or a missing ஒற்று, plus words repeatedly misspelt the same way
+  - **Detection Quality:** the annotators' accept/reject rate for each detector and each reason shown, and how many errors the tools missed
+  - **Vocabulary**
+- **Document view:** the learner text is shown with coloured error marks, and each error has a Tamil type label.
+- **Sample data** (`data/corpus.json`): the QA1 script with its answer key, the two clean texts and the earlier demo texts, all flagged `sample: true` and shown with a banner. Real records replace them: saved records in local mode, the team corpus in cloud mode.
+- **Records service:** the summary now keeps a compact detection history, so Detection Quality also works in cloud mode.

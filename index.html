@@ -42,27 +42,38 @@
       <div class="stats-grid">
         <div class="card centered-card"><span>Learner texts</span><strong id="statDocs">0</strong></div>
         <div class="card centered-card"><span>Total words</span><strong id="statWords">0</strong></div>
-        <div class="card centered-card"><span>Annotations</span><strong id="statAnnotations">0</strong></div>
-        <div class="card centered-card"><span>Levels represented</span><strong id="statLevels">0</strong></div>
+        <div class="card centered-card"><span>Errors annotated</span><strong id="statAnnotations">0</strong></div>
+        <div class="card centered-card"><span>Errors per 100 words</span><strong id="statLevels">0</strong></div>
       </div>
+      <div id="dashSampleBanner"></div>
 
       <div class="two-col">
         <div class="panel">
-          <h3>Learner levels</h3>
+          <h3>Learner levels <span class="small muted">errors per 100 words, coloured by group</span></h3>
           <div id="levelBreakdown"></div>
         </div>
         <div class="panel">
-          <h3>Annotation categories</h3>
+          <h3>Error types <span class="small muted">Tamil taxonomy</span></h3>
           <div id="annotationBreakdown"></div>
         </div>
       </div>
 
+      <div class="two-col">
+        <div class="panel">
+          <h3>Corpus coverage <span class="small muted">texts per level and task</span></h3>
+          <div id="coverageMatrix"></div>
+        </div>
+        <div class="panel">
+          <h3>Recently saved</h3>
+          <div id="recentRecords"></div>
+        </div>
+      </div>
       <div class="workflow panel">
         <div><strong>UPLOAD</strong><span>Add data → OCR/HTR → Verify → Annotate</span></div>
         <div class="arrow">→</div>
-        <div><strong>ANALYZE</strong><span>Search → KWIC → Wordlist → N-grams → Collocations</span></div>
+        <div><strong>ANALYZE</strong><span>Search → KWIC → Wordlist → Error concordance</span></div>
         <div class="arrow">→</div>
-        <div><strong>INSIGHTS</strong><span>Patterns → Trends → Compare levels</span></div>
+        <div><strong>INSIGHTS</strong><span>Error types → Levels &amp; tasks → Confusions → Detection quality</span></div>
       </div>
     </section>
 
@@ -490,7 +501,7 @@
       <div class="mini-stats">
         <div class="centered-card"><span>Learner texts</span><strong id="analyzeDocs">0</strong></div>
         <div class="centered-card"><span>Total words</span><strong id="analyzeWords">0</strong></div>
-        <div class="centered-card"><span>Annotations</span><strong id="analyzeAnnotations">0</strong></div>
+        <div class="centered-card"><span>Errors annotated</span><strong id="analyzeAnnotations">0</strong></div>
       </div>
 
       <div class="mode-banner" id="analyzeModeBanner">
@@ -535,6 +546,11 @@
         </div>
 
         <div class="tool-wrap">
+          <button class="toolbtn" data-tool="errors">Error Concordance</button>
+          <button class="info-btn" type="button" aria-label="About Error Concordance" data-tip="Every annotated learner error in its sentence, filterable by Tamil error group and type, task and year. Download as CSV for research.">i</button>
+        </div>
+
+        <div class="tool-wrap">
           <button class="toolbtn" data-tool="texttypes">Text Type Analysis</button>
           <button class="info-btn" type="button" aria-label="About Text Type Analysis" data-tip="Shows the distribution of texts and words across writing or task types. With a search term, it shows where that term occurs most across text types.">i</button>
         </div>
@@ -574,27 +590,27 @@
       <div class="tool-tabs">
         <div class="tool-wrap">
           <button class="insightbtn active" data-insight="overview">Overview</button>
-          <button class="info-btn" type="button" aria-label="About Insights Overview" data-tip="Summarises the size and composition of the selected corpus or learner level.">i</button>
+          <button class="info-btn" type="button" aria-label="About Overview" data-tip="Size of the selected corpus and its error profile on the Tamil taxonomy, per 100 words.">i</button>
         </div>
         <div class="tool-wrap">
-          <button class="insightbtn" data-insight="trends">Trends</button>
-          <button class="info-btn" type="button" aria-label="About Trends" data-tip="Shows how selected measures change across learner levels.">i</button>
+          <button class="insightbtn" data-insight="errors">Error Types</button>
+          <button class="info-btn" type="button" aria-label="About Error Types" data-tip="Every Tamil error group with its sub-types, most frequent first.">i</button>
         </div>
         <div class="tool-wrap">
-          <button class="insightbtn" data-insight="distribution">Distribution</button>
-          <button class="info-btn" type="button" aria-label="About Distribution" data-tip="Shows how annotations or other features are distributed within the selected corpus.">i</button>
+          <button class="insightbtn" data-insight="compare">Levels & Tasks</button>
+          <button class="info-btn" type="button" aria-label="About Levels & Tasks" data-tip="Error profile per learner level (P4 → JC2) and per task type, normalised per 100 words.">i</button>
         </div>
         <div class="tool-wrap">
-          <button class="insightbtn" data-insight="compare">Compare Levels</button>
-          <button class="info-btn" type="button" aria-label="About Compare Levels" data-tip="Compares normalised measures across P4, P6, Secondary 2, Secondary 4, JC1 and JC2.">i</button>
+          <button class="insightbtn" data-insight="confusions">Confusions</button>
+          <button class="info-btn" type="button" aria-label="About Confusions" data-tip="Which letters learners confuse (e.g. ல → ழ, missing ஒற்று) and which words are repeatedly misspelt.">i</button>
         </div>
         <div class="tool-wrap">
-          <button class="insightbtn" data-insight="errors">Error Patterns</button>
-          <button class="info-btn" type="button" aria-label="About Error Patterns" data-tip="Summarises recurring learner-error or annotation categories in the selected corpus.">i</button>
+          <button class="insightbtn" data-insight="detection">Detection Quality</button>
+          <button class="info-btn" type="button" aria-label="About Detection Quality" data-tip="How often annotators accepted each automatic detector's suggestions, and how many errors the tools missed.">i</button>
         </div>
         <div class="tool-wrap">
           <button class="insightbtn" data-insight="vocabulary">Vocabulary</button>
-          <button class="info-btn" type="button" aria-label="About Vocabulary" data-tip="Summarises vocabulary size, word diversity and the most frequent word forms.">i</button>
+          <button class="info-btn" type="button" aria-label="About Vocabulary" data-tip="Vocabulary size, word diversity and the most frequent word forms.">i</button>
         </div>
       </div>
 
@@ -645,6 +661,7 @@
   <script src="taxonomy.js"></script>
   <script src="stage3.js"></script>
   <script src="stage4.js"></script>
+  <script src="corpus-stats.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
