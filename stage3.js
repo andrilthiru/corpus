@@ -36,6 +36,7 @@ const ISSUE_KINDS = {
 let activeIssueId = null;
 let transcriptView = "page";        // "page" | "document" | "edit"
 let wholePageEditing = false;
+let typedPageSavedAt = null;
 let reviewMode = "exceptions";      // "exceptions" | "all"
 let showExcludedLines = false;
 
@@ -541,7 +542,7 @@ function renderTranscriptPanel() {
     `Page ${reviewPage} of ${stats.pages} · ${stats.reviewedPages} page${stats.reviewedPages === 1 ? "" : "s"} reviewed · ${stats.words.toLocaleString()} words`;
   document.querySelectorAll("[data-transcript-view]").forEach((b) =>
     b.classList.toggle("active", b.dataset.transcriptView === transcriptView));
-  if (transcriptView === "edit") { renderTranscriptEditor(target); return; }
+  if (transcriptView === "edit" || transcriptView === "type") { renderTranscriptEditor(target); return; }
 
   const activeLineId = (activeIssueId && findIssue(activeIssueId)?.line?.line_id) || activeReviewLineId;
   const renderPage = (p, withHeader) => {
@@ -629,6 +630,15 @@ function applyPageText(page, text) {
     all.splice(lastIdx + 1, 0, nl);
   });
   lines.slice(rows.length).forEach((l) => excludeLineQuiet(l));   // fewer rows than regions: extra regions excluded
+  // the reviewer has typed the whole page: every remaining review item on it is settled by that text
+  pageLines(page).forEach((l) => {
+    lineIssues(l).forEach((i) => {
+      if (i.status === "open") { i.status = "resolved"; i.resolution = { action: "page_typed", origin: "typed_page" }; }
+    });
+    if (lineIncluded(l)) l.review.method = l.review.method === "typed" ? "typed" : "page_typed";
+    refreshLineStatus(l);
+  });
+  typedPageSavedAt = new Date();
   wholePageEditing = false;
   scheduleDraftAutosave();
   renderStructuredReview();
@@ -636,21 +646,36 @@ function applyPageText(page, text) {
 function renderTranscriptEditor(target) {
   const lines = pageLines(reviewPage);
   if (!lines.length) { target.innerHTML = '<div class="t-empty">No text on this page yet.</div>'; return; }
-  if (wholePageEditing) {
-    const txt = lines.filter(lineIncluded).map((l) => lineText(l)).join("\n");
+  if (transcriptView === "type") {
+    const current = lines.filter(lineIncluded).map((l) => lineText(l)).join("\n");
+    const justSaved = typedPageSavedAt && Date.now() - typedPageSavedAt.getTime() < 4000;
     target.innerHTML = `
-      <div class="t-edit-tools small">Type or paste the whole page, one written line per row. <b>Save page</b> replaces this page's transcript
-        (rows are matched to the scan's lines in order).</div>
-      <textarea class="tamil t-edit-page">${escapeHtml(txt)}</textarea>
-      <div class="t-edit-actions"><button type="button" class="primary-btn" data-edit-page-save>Save page</button>
-        <button type="button" data-edit-mode="lines">Cancel</button></div>`;
-    target.querySelector("[data-edit-page-save]").addEventListener("click", () => applyPageText(reviewPage, target.querySelector(".t-edit-page").value));
-    target.querySelector('[data-edit-mode="lines"]').addEventListener("click", () => { wholePageEditing = false; renderTranscriptPanel(); });
+      <div class="t-edit-tools small">For pages that are hard to read: type or paste <b>everything the learner wrote on this page</b>,
+        one handwritten line per row, exactly as written (mistakes included). It starts from the current transcript — the machine reading
+        with your corrections. <b>Save page text</b> replaces this page's transcript and settles all of its review items.</div>
+      <textarea class="tamil t-edit-page" spellcheck="false">${escapeHtml(current)}</textarea>
+      <div class="t-edit-actions">
+        <button type="button" class="primary-btn" data-edit-page-save>Save page text</button>
+        <button type="button" data-edit-page-revert>Undo unsaved changes</button>
+        <button type="button" class="text-button" data-edit-page-blank>Start from a blank page</button>
+        <span class="small t-type-status">${justSaved ? "✓ Saved — this page's transcript now comes from the typed text." : "<kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves"}</span>
+      </div>`;
+    const ta = target.querySelector(".t-edit-page");
+    const save = () => applyPageText(reviewPage, ta.value);
+    target.querySelector("[data-edit-page-save]").addEventListener("click", save);
+    target.querySelector("[data-edit-page-revert]").addEventListener("click", () => { ta.value = current; });
+    target.querySelector("[data-edit-page-blank]").addEventListener("click", () => {
+      if (!ta.value.trim() || confirm("Clear the box and type this page from scratch?")) { ta.value = ""; ta.focus(); }
+    });
+    ta.addEventListener("keydown", (ev) => {
+      if (ev.isComposing || ev.keyCode === 229) return;
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); save(); }
+    });
     return;
   }
   target.innerHTML = `
-    <div class="t-edit-tools small">Edit any saved line. It saves when you leave the box (or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>).
-      <button type="button" class="text-button" data-edit-mode="page">Type the whole page instead</button></div>
+    <div class="t-edit-tools small">Edit any line. It saves when you leave the box (or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>).
+      Page too hard to read? Use <button type="button" class="text-button" data-edit-mode="page">⌨ Type page</button> to enter it all at once.</div>
     ${lines.map((l, i) => `
       <div class="t-edit-row ${lineIncluded(l) ? "" : "excluded"} ${l.line_id === activeReviewLineId ? "active" : ""}" data-line-id="${escapeHtml(l.line_id)}">
         <span class="t-edit-num">${i + 1}</span>
@@ -658,7 +683,7 @@ function renderTranscriptEditor(target) {
         <button type="button" class="text-button" data-edit-include>${lineIncluded(l) ? "Exclude" : "Include"}</button>
       </div>`).join("")}`;
   const fit = (ta) => { ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`; };
-  target.querySelector('[data-edit-mode="page"]').addEventListener("click", () => { wholePageEditing = true; renderTranscriptPanel(); });
+  target.querySelector('[data-edit-mode="page"]').addEventListener("click", () => { transcriptView = "type"; renderTranscriptPanel(); });
   target.querySelectorAll(".t-edit-row").forEach((row) => {
     const id = row.dataset.lineId;
     const ta = row.querySelector("textarea");
@@ -740,8 +765,9 @@ function renderReviewRail() {
     const isOpen = issue.status === "open" && lineIncluded(line);
     if (!isOpen) {
       const r = issue.resolution || {};
-      const what = r.origin === "ocr_corrected" ? `→ ${r.value}` : r.origin === "excluded" ? "excluded" : r.origin === "kept" ? "kept"
-        : r.origin === "struck_out" ? (r.auto ? "crossed out · removed automatically" : "crossed out · removed") : "confirmed";
+      const what = r.action === "transcript_edit" ? "edited in transcript" : r.origin === "ocr_corrected" ? `→ ${r.value ?? ""}` : r.origin === "excluded" ? "excluded" : r.origin === "kept" ? "kept"
+        : r.origin === "struck_out" ? (r.auto ? "crossed out · removed automatically" : "crossed out · removed")
+        : r.origin === "typed_page" ? "settled by typed page" : "confirmed";
       return `<article class="rail-item resolved ${active ? "active" : ""}" data-rail-issue="${escapeHtml(issue.id)}">
         <div class="rail-item-head"><span class="tamil rail-span">${escapeHtml(r.prev ?? issue.text)}</span>
           <span class="rail-status ok tamil">${escapeHtml(what)}</span>

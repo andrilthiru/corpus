@@ -1757,3 +1757,7 @@ b.good { color: #1f5c40; } b.bad { color: var(--g-ilakkanam); }
 .ask-a { font-size: 15px; line-height: 1.7; padding: 12px 14px; background: var(--soft); border-radius: 10px; margin-bottom: 6px; }
 .k-persistent .f-icon { background: var(--g-ilakkanam-bg); color: var(--g-ilakkanam); font-size: 12px; }
 .k-emerging .f-icon { background: var(--g-sol-bg); color: var(--g-sol); }
+[data-transcript-view] { white-space: nowrap; }
+.t-edit-actions { flex-wrap: wrap; align-items: center; }
+.t-edit-actions button { padding: 7px 12px; font-size: 13px; }
+.t-type-status { color: var(--muted); }
