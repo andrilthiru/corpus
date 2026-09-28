@@ -1773,3 +1773,4 @@ mark.a-mark.a-ins-text { text-decoration: underline wavy var(--c); text-underlin
 .s4-unreviewed { padding: 8px 12px; margin: 0 0 10px; border-radius: 10px; background: #f1f5f9; border: 1px solid #dbe3ec; color: #334155; }
 .s4-unreviewed .text-button { padding: 0; font-size: inherit; }
 mark.a-mark.a-ins-view { font-size: .8em; vertical-align: super; background: var(--bg); padding: 0 3px; }
+.learner-text.keep-lines { white-space: pre-line; }

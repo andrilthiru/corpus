@@ -2203,7 +2203,7 @@ function renderRecordReview() {
     </div>
     <div class="review-box">
       <h4>Final learner text</h4>
-      <div class="tamil learner-text">${escapeHtml(record.text || "No verified text yet.")}</div>
+      <div class="tamil learner-text keep-lines">${escapeHtml(record.text || "No verified text yet.")}</div>
     </div>
     <details class="record-json"><summary>Technical view (JSON)</summary>
       <pre class="review-json" id="reviewJson">${escapeHtml(JSON.stringify(record, null, 2))}</pre></details>
