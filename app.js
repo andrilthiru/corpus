@@ -1509,6 +1509,7 @@ function currentUploadRecord() {
 }
 
 function goUploadStep(step) {
+  if (typeof flushTypedPage === "function") flushTypedPage();   // keep typed page text that wasn't saved
   uploadCurrentStep = Number(step);
 
   document.querySelectorAll(".upload-step-panel").forEach((panel) => {
@@ -2650,6 +2651,7 @@ function wireNavigation() {
   });
 
   $("reviewPrevPage").addEventListener("click", () => {
+    flushTypedPage();
     reviewPage = Math.max(1, reviewPage - 1);
     activeIssueId = null;
     activeReviewLineId = null;
@@ -2660,6 +2662,7 @@ function wireNavigation() {
 
   $("reviewNextPage").addEventListener("click", () => {
     const total = Number(importedTranscriptionReview?.page_count || 1);
+    flushTypedPage();
     reviewPage = Math.min(total, reviewPage + 1);
     activeIssueId = null;
     activeReviewLineId = null;
