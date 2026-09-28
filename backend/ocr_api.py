@@ -1376,6 +1376,33 @@ def detect_errors_sarvam(text: str, level: str = "", task: str = ""):
     ]
 
 
+def detect_errors_openai(text: str, level: str = "", task: str = ""):
+    """GPT for "Ask AI for more". In the v3.1 benchmark GPT's open-ended search found 23/23 and 22/22 of the
+    known errors (Sarvam: 18/23 and 3/22), so it is the main discovery model. Pay-as-you-go OpenAI API key."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured.")
+    model = os.getenv("OPENAI_MODEL", "gpt-5")        # the model used in the benchmark
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a careful Tamil learner-corpus error annotator. Return only defensible candidate annotations."},
+            {"role": "user", "content": error_detection_prompt(text, level, task)},
+        ],
+        "max_completion_tokens": 16000,               # GPT-5 reasons before answering; leave room for both
+        "response_format": {"type": "json_schema",
+                            "json_schema": {"name": "tamil_error_candidates", "strict": True, "schema": ERROR_SCHEMA}},
+    }
+    response = httpx.post("https://api.openai.com/v1/chat/completions",
+                          headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                          json=payload, timeout=240)
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenAI HTTP {response.status_code}: {response.text[:200]}")
+    choice = (response.json().get("choices") or [{}])[0]
+    items = parse_candidates_tolerant((choice.get("message") or {}).get("content") or "")
+    return [c for item in items if (c := clean_error_candidate(item, "openai"))]
+
+
 def detect_errors_gemini(text: str, level: str = "", task: str = ""):
     _, detected_project = google.auth.default()
     project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT") or detected_project
@@ -1484,6 +1511,8 @@ def _engine_family(engine: str):
         return "sarvam"
     if engine == "gemini":
         return "gemini"
+    if engine == "openai":
+        return "openai"
     return engine
 
 
@@ -1603,6 +1632,8 @@ def health():
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
         "gemini_model": os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "openai_model": os.getenv("OPENAI_MODEL", "gpt-5"),
         "iyal_lexicon": {
             "source": "KaniyamFoundation Iyal official word-bank resources",
             "status": iyal_runtime_status(load=False),
@@ -1630,7 +1661,7 @@ def _taxonomy_payload():
 @app.post("/api/detect-errors")
 async def detect_errors(payload: dict = Body(...)):
     """mode=standard (default): the frozen v4 detector — only gated/verified candidates reach the annotator.
-       mode=discovery: open-ended AI suggestions (Sarvam + Gemini), shown to the annotator as "possible".
+       mode=discovery: open-ended AI suggestions (GPT + Sarvam + Gemini, whichever are configured), shown to the annotator as "possible".
        mode=legacy: the pre-v4 behaviour, kept for comparison."""
     text = str(payload.get("text", "") or "").strip()
     if not text:
@@ -1659,7 +1690,7 @@ async def detect_errors(payload: dict = Body(...)):
     if mode == "discovery":
         import asyncio
         found = []
-        pairs = (("sarvam", detect_errors_sarvam), ("gemini", detect_errors_gemini))
+        pairs = (("openai", detect_errors_openai), ("sarvam", detect_errors_sarvam), ("gemini", detect_errors_gemini))
         results = await asyncio.gather(*(run_in_threadpool(fn, text, level, task) for _, fn in pairs),
                                        return_exceptions=True)       # both models asked at the same time
         for (name, _), got in zip(pairs, results):

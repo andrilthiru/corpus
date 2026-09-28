@@ -17,7 +17,7 @@ let previewPendingCorrections = false;
 let annotationItemSeq = 0;
 let annotationBaseText = null;     // the exact text error detection ran on (to spot later transcript edits)
 
-const ENGINE_LABELS = { iyal: "Iyal", ddspell_style: "DDSpell-style", sarvam: "Sarvam", gemini: "Gemini",
+const ENGINE_LABELS = { iyal: "Iyal", ddspell_style: "DDSpell-style", sarvam: "Sarvam", gemini: "Gemini", openai: "GPT",
                         rules: "Tamil rules", lexicon: "Dictionary neighbour", tamilvu: "TamilVU", vaani: "Vaani",
                         muril: "MuRIL", manual: "Manual" };
 const GATE_LABELS = { mechanical_rule: "certain rule", agreement: "2 checks agree", ai_confirmed: "Sarvam confirmed",
@@ -640,7 +640,7 @@ async function runDiscovery() {
   if (!text || !base) return;
   discoveryRunning = true;
   const btn = $("runDiscoveryBtn");
-  btn.disabled = true; btn.textContent = "Asking AI…";
+  btn.disabled = true; btn.textContent = "Asking AI… (up to 2 min)";
   try {
     const response = await fetch(`${base}/api/detect-errors`, {
       method: "POST", headers: await authHeaders({ "Content-Type": "application/json" }),

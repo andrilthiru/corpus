@@ -25,6 +25,7 @@ import time
 import tamil_pipeline as P
 
 RES = os.getenv("TAMIL_RESOURCES", "/opt/tamil")
+SECOND_OPINION = {"tamilvu", "vaani"}   # supporting evidence only: never chooses the correction
 MECHANICAL = {"PUNCT", "EXTRA"}          # rules_generic subtypes that are deterministic
 MLM_BUDGET_S = float(os.getenv("MLM_BUDGET_SECONDS", "75"))
 ENGINE_NAME = {"rules_generic": "rules", "lexical_neighbour": "lexicon", "tamilvu": "tamilvu",
@@ -97,6 +98,16 @@ def _frontend(row: dict, reason: str, verdict: dict | None, text: str) -> dict:
     engines = [ENGINE_NAME.get(s, s) for s in srcs]
     correction = row.get("suggested_correction") or ""
     subtype = row.get("subtype")
+    # TamilVU / Vaani are second opinions: in testing TamilVU alone produced only false flags, so when a
+    # primary check (rules, dictionary neighbour, MuRIL) proposed a correction for the same span, that one
+    # is used — e.g. வேளை → வேலை (MuRIL), not வேளைச் (TamilVU). The type follows the chosen correction.
+    evs = row.get("evidence") or []
+    same_span = [ev for ev in evs if ev.get("correction") and ev.get("start") == row["start"] and ev.get("end") == row["end"]]
+    primary = [ev for ev in same_span if ev.get("source") not in SECOND_OPINION]
+    from_second_only = correction and not any(ev["correction"] == correction for ev in primary)
+    if primary and from_second_only:
+        correction = primary[0]["correction"]
+        subtype = primary[0].get("subtype") or P.classify_correction(row["error_text"], correction) or subtype
     if verdict and verdict.get("is_error"):
         engines.append("sarvam")
         correction = verdict.get("correction") or correction

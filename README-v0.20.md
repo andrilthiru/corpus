@@ -12,3 +12,8 @@
 **Backend 0.20.0**
 - **Gemini replies.** Gemini's discovery reply was being cut off: Gemini 2.5's internal reasoning used up the 1,800-token output limit, so only Sarvam's suggestions ever arrived. Reasoning is now off for this call, the limit is 8,192, and complete items from a cut-off reply are kept.
 - **Parallel requests.** Sarvam and Gemini are now asked at the same time.
+
+## Detection changes matched to the v3.1 test results
+- **"Ask AI for more" now includes GPT** (`gpt-5`, the model tested). It asks GPT, Sarvam and Gemini at the same time; a model that isn't configured is skipped and named in the status line. In the benchmark, GPT's open search found 23/23 and 22/22 known errors (Sarvam 18/23 and 3/22; Gemini untested).
+  - Needs a pay-as-you-go OpenAI API key set on the Cloud Run service as `OPENAI_API_KEY` (optional: `OPENAI_MODEL`).
+- **TamilVU no longer chooses the correction.** When MuRIL, the rules or the dictionary neighbour proposed a correction for the same word, theirs is used, and the error type follows it (வேளை → வேலை, ல/ள/ழ; not வேளைச், ஒற்று). In testing TamilVU on its own produced only false flags.
