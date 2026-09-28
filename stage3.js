@@ -40,9 +40,10 @@ let typedDraft = null;              // unsaved text in the Type page box: {page,
 
 /* Typed page text is kept even if the reviewer leaves without pressing Save (another tab, page or step).
    An emptied box is never applied automatically — that would exclude the whole page. */
-function flushTypedPage() {
+function flushTypedPage({ keepUndo = false } = {}) {
   const d = typedDraft;
   typedDraft = null;
+  if (!keepUndo) typedUndo = null;       // leaving the page / view / step ends the chance to undo
   if (!d || !d.text.trim() || d.text === d.base) return false;
   applyPageText(d.page, d.text);
   return true;
@@ -395,7 +396,7 @@ function nextOpenIssueId(afterId = null, page = reviewPage) {
   return (after || list.find((i) => i.status === "open"))?.id || null;
 }
 function selectIssue(issueId, { scroll = true } = {}) {
-  flushTypedPage();
+  flushTypedPage({ keepUndo: true });
   activeIssueId = issueId;
   const found = issueId ? findIssue(issueId) : null;
   if (found) activeReviewLineId = found.line.line_id;
@@ -411,7 +412,7 @@ function selectIssue(issueId, { scroll = true } = {}) {
   });
 }
 function selectLine(lineId, { scroll = true } = {}) {
-  flushTypedPage();
+  flushTypedPage({ keepUndo: true });
   const line = reviewLines().find((l) => l.line_id === lineId);
   const firstOpen = line ? openIssues(line)[0] : null;
   if (firstOpen) return selectIssue(firstOpen.id, { scroll });
@@ -627,7 +628,7 @@ function afterTranscriptEdit() {
   $("s3TranscriptMeta").textContent = `Page ${reviewPage} of ${s.pages} · ${s.reviewedPages} page${s.reviewedPages === 1 ? "" : "s"} reviewed · ${s.words.toLocaleString()} words`;
   scheduleDraftAutosave();
 }
-function applyPageText(page, text) {
+function applyPageText(page, text, { render = true } = {}) {
   const lines = pageLines(page).filter(lineIncluded);
   const rows = String(text || "").split("\n").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   rows.forEach((row, i) => {
@@ -654,7 +655,22 @@ function applyPageText(page, text) {
   typedPageSavedAt = new Date();
   wholePageEditing = false;
   scheduleDraftAutosave();
-  renderStructuredReview();
+  if (render) renderStructuredReview();
+  else updateReviewProgress();          // counters + Continue button now; the full redraw follows (see autoSaveTypedPage)
+}
+let typedUndo = null;                   // {page, lines}: the transcript before this round of typing, for "Undo my changes"
+
+/* Typed page text saves itself when the reviewer clicks outside the box — no Save button, like every
+   other choice in this step. The redraw waits a moment so the click that moved focus still lands. */
+function autoSaveTypedPage() {
+  const d = typedDraft;
+  if (!d || d.text === d.base) return;
+  if (!d.text.trim()) return;             // an emptied box is never saved automatically
+  typedDraft = null;
+  applyPageText(d.page, d.text, { render: false });
+  const st = document.querySelector(".t-type-status");
+  if (st) st.textContent = "✓ Saved — this page's transcript now comes from the typed text.";
+  setTimeout(() => { if (!document.activeElement?.classList?.contains("t-edit-page")) renderStructuredReview(); }, 300);
 }
 function renderTranscriptEditor(target) {
   const lines = pageLines(reviewPage);
@@ -662,28 +678,46 @@ function renderTranscriptEditor(target) {
   if (transcriptView === "type") {
     const current = lines.filter(lineIncluded).map((l) => lineText(l)).join("\n");
     const justSaved = typedPageSavedAt && Date.now() - typedPageSavedAt.getTime() < 4000;
+    const canUndo = typedUndo && typedUndo.page === reviewPage;
     target.innerHTML = `
       <div class="t-edit-tools small">For pages that are hard to read: type or paste <b>everything the learner wrote on this page</b>,
         one handwritten line per row, exactly as written (mistakes included). It starts from the current transcript — the machine reading
-        with your corrections. <b>Save page text</b> replaces this page's transcript and settles all of its review items.</div>
+        with your corrections. Your text is <b>saved automatically</b> when you click outside the box; it replaces this page's transcript
+        and settles all of its review items.</div>
       <textarea class="tamil t-edit-page" spellcheck="false">${escapeHtml(typedDraft && typedDraft.page === reviewPage ? typedDraft.text : current)}</textarea>
       <div class="t-edit-actions">
-        <button type="button" class="primary-btn" data-edit-page-save>Save page text</button>
-        <button type="button" data-edit-page-revert>Undo unsaved changes</button>
+        <button type="button" data-edit-page-revert ${canUndo || typedDraft ? "" : "disabled"}>Undo my changes</button>
         <button type="button" class="text-button" data-edit-page-blank>Start from a blank page</button>
-        <span class="small t-type-status">${justSaved ? "✓ Saved — this page's transcript now comes from the typed text." : "<kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves · it also saves when you move to another tab, page or step"}</span>
+        <span class="small t-type-status">${justSaved ? "✓ Saved — this page's transcript now comes from the typed text." : "Saves automatically when you click outside the box."}</span>
       </div>`;
     const ta = target.querySelector(".t-edit-page");
-    const save = () => { typedDraft = null; applyPageText(reviewPage, ta.value); };
-    ta.addEventListener("input", () => { typedDraft = { page: reviewPage, text: ta.value, base: current }; });
-    target.querySelector("[data-edit-page-save]").addEventListener("click", save);
-    target.querySelector("[data-edit-page-revert]").addEventListener("click", () => { ta.value = current; typedDraft = null; });
-    target.querySelector("[data-edit-page-blank]").addEventListener("click", () => {
-      if (!ta.value.trim() || confirm("Clear the box and type this page from scratch?")) { ta.value = ""; typedDraft = { page: reviewPage, text: "", base: current }; ta.focus(); }
-    });
-    ta.addEventListener("keydown", (ev) => {
+    const undoBtn = target.querySelector("[data-edit-page-revert]");
+    const startDraft = () => {
+      if (!typedUndo || typedUndo.page !== reviewPage) typedUndo = { page: reviewPage, lines: JSON.parse(JSON.stringify(importedTranscriptionReview.lines)) };
+      undoBtn.disabled = false;
+    };
+    ta.addEventListener("input", () => { startDraft(); typedDraft = { page: reviewPage, text: ta.value, base: current }; updateReviewProgress(); });
+    ta.addEventListener("blur", autoSaveTypedPage);
+    ta.addEventListener("keydown", (ev) => {           // Ctrl+Enter still saves at once, for keyboard users
       if (ev.isComposing || ev.keyCode === 229) return;
-      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); save(); }
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ta.blur(); }
+    });
+    // keep focus in the box while pressing these buttons, so a half-typed page is not saved first
+    target.querySelectorAll(".t-edit-actions button").forEach((b) => b.addEventListener("mousedown", (ev) => ev.preventDefault()));
+    undoBtn.addEventListener("click", () => {
+      typedDraft = null;
+      if (typedUndo && typedUndo.page === reviewPage) {
+        importedTranscriptionReview.lines = typedUndo.lines;
+        typedUndo = null; typedPageSavedAt = null;
+        scheduleDraftAutosave();
+        renderStructuredReview();
+      } else { ta.value = current; undoBtn.disabled = true; }
+    });
+    target.querySelector("[data-edit-page-blank]").addEventListener("click", () => {
+      if (!ta.value.trim() || confirm("Clear the box and type this page from scratch?")) {
+        startDraft(); ta.value = ""; typedDraft = { page: reviewPage, text: "", base: current }; ta.focus();
+        target.querySelector(".t-type-status").textContent = "Type the page. It is saved when you click outside the box (an empty box is never saved).";
+      }
     });
     return;
   }
@@ -905,7 +939,11 @@ function updateReviewProgress() {
   const summary = `${s.regions} regions · ${s.clear} clear · ${s.needReview} need review · ${s.resolved}/${s.issues} resolved`;
   $("reviewProgress").textContent = s.issues && s.resolved === s.issues ? `✓ ${s.issues}/${s.issues} resolved` : `${s.resolved}/${s.issues} resolved`;
   $("reviewSummary").textContent = summary;
-  const openTotal = s.issues - s.resolved;
+  let openTotal = s.issues - s.resolved;
+  // a typed page not yet saved will settle its page's items when saved (it saves on the way out)
+  if (typedDraft && typedDraft.text.trim() && typedDraft.text !== typedDraft.base) {
+    openTotal -= pageLines(typedDraft.page).filter(lineIncluded).flatMap(lineIssues).filter((i) => i.status === "open").length;
+  }
   const included = reviewLines().filter(lineIncluded);
   $("uploadToAnnotate").disabled = !included.length || openTotal > 0;
   $("uploadToAnnotate").title = openTotal ? `${openTotal} OCR issue(s) still open` : "";

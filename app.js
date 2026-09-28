@@ -2598,6 +2598,7 @@ function wireNavigation() {
   });
 
   $("uploadToAnnotate").addEventListener("click", () => {
+    flushTypedPage();                     // a typed page is saved before the checks below
     if (importedTranscriptionReview) {
       if (ocrProcessing || ocrPageStates.some((x) => x.status !== "ready")) {
         const waiting = ocrPageStates.filter((x) => x.status === "waiting" || x.status === "processing").length;
