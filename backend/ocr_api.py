@@ -28,6 +28,7 @@ from google.genai import types as genai_types
 import google.auth
 
 from strike_detect import mark_struck_words
+from line_align import build_physical_lines
 from tamil_taxonomy import (CODES as TAMIL_SUBTYPE_CODES, SUBTYPES as TAMIL_SUBTYPES, SUBTYPE_TO_LEGACY,
                             LEGACY_TO_SUBTYPE, GROUPS as TAMIL_GROUPS, assign_tag, taxonomy_prompt_block)
 
@@ -304,8 +305,17 @@ def process_one_page(
     except Exception as exc:                                   # never block OCR on this optional signal
         print(f"strike detection skipped: {exc}")
     blocks = normalize_sarvam_blocks(sarvam_pages[0], page_img)
-    surya_lines = detect_surya_lines(page_img)
-    records = map_blocks_to_lines(blocks, surya_lines, page_number)
+    # v0.19: physical lines from Google's word boxes, with Sarvam's words aligned into them.
+    # The older Sarvam-block + Surya mapping is kept as the fallback.
+    records = None
+    try:
+        records = build_physical_lines(blocks, google_page["words"], page_number,
+                                       confidence_band, text_similarity, texts_disagree)
+    except Exception as exc:
+        print(f"physical-line alignment failed, using block mapping: {exc!r}")
+    if not records:
+        surya_lines = detect_surya_lines(page_img)
+        records = map_blocks_to_lines(blocks, surya_lines, page_number)
 
     # Existing helpers index by original page number. Supply sparse arrays so
     # the same review logic works for an independently processed page.
@@ -654,6 +664,8 @@ def attach_google_to_lines(records, google_pages):
     with Sarvam text, then derives independent OCR disagreement/confidence signals.
     """
     for r in records:
+        if r.get("google_prefilled"):
+            continue                        # already paired word-by-word in line_align
         page_num = r["page_number"]
         polygon = r.get("polygon")
         pb = polygon_bbox(polygon)
@@ -717,6 +729,7 @@ def finalise_review(records):
             flags.append("SARVAM_LOW_CONFIDENCE")
 
         flags.extend(r.get("visual_flags", []))
+        flags.extend(r.get("extra_flags", []))
 
         if r.get("alignment_count_mismatch"):
             flags.append("SARVAM_SURYA_LINE_COUNT_MISMATCH")
@@ -760,6 +773,7 @@ def finalise_review(records):
             or "GOOGLE_LOW_WORD_CONFIDENCE" in flags
             or "GOOGLE_LOW_SYMBOL_CONFIDENCE" in flags
             or any("ALIGNMENT" in f or "COUNT_MISMATCH" in f for f in flags)
+            or "ONLY_SECOND_READING" in flags
         ):
             priority = "MEDIUM"
         else:
@@ -769,6 +783,7 @@ def finalise_review(records):
             "line_id": r["line_id"],
             "page_number": r["page_number"],
             "geometry": {
+                "source": r.get("line_source", "surya_line_detection"),
                 "polygon": r.get("polygon"),
                 "surya_index": r.get("surya_index"),
                 "surya_confidence": r.get("surya_confidence"),
@@ -1555,7 +1570,7 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
-        "version": "0.18.0",
+        "version": "0.19.0",
         "tamil_detection": _detection_status(),
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",

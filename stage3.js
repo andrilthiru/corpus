@@ -95,6 +95,8 @@ function isWeakLine(line) {
   const enginesAgree = line?.comparison && line.comparison.models_disagree === false && (line?.secondary_ocr?.raw_text || "").trim();
   const googleOk = (line?.secondary_ocr?.min_word_confidence ?? 1) >= EXCEPTION_RULES.googleLowWordConfidence;
   if (flags.includes("NO_LINE_GEOMETRY")) return true;
+  // v0.19 physical-line alignment: a line only one engine read, or whose words could not be matched up
+  if (flags.includes("ONLY_SECOND_READING") || flags.includes("LINE_ALIGNMENT_UNCERTAIN")) return true;
   if (legib < EXCEPTION_RULES.weakLineVisualScore) return true;
   if (line?.review?.priority === "HIGH" && !(enginesAgree && googleOk)) return true;
   return false;
