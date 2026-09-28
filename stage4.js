@@ -11,7 +11,7 @@
    ========================================================= */
 
 let annotationItems = [];          // unified review list of error cards
-let annotationFilter = "all";      // all | pending | accepted | rejected
+let annotationFilter = "pending";  // pending (default: reviewed cards drop out of the list) | all | accepted | rejected
 let activeAnnotationId = null;
 let previewPendingCorrections = false;
 let annotationItemSeq = 0;
@@ -24,8 +24,11 @@ const GATE_LABELS = { mechanical_rule: "certain rule", agreement: "2 checks agre
                       unverified_rule: "rule · not AI-checked", ai_discovery: "AI suggestion" };
 
 function annotationText() {
-  return normalizeTamilText(consolidatedVerifiedText() || $("verifiedText").value || "");
+  // with a structured transcript, Stage 4 always shows its current text (never the original machine reading)
+  const raw = importedTranscriptionReview ? consolidatedVerifiedText() : $("verifiedText").value;
+  return normalizeTamilText(raw || "").trim();
 }
+function isInsertion(item) { return item.start != null && item.start === item.end && !item.text; }
 function newItemId() { annotationItemSeq += 1; return `A${Date.now().toString(36)}${annotationItemSeq}`; }
 function itemGroup(item) { return subtypeGroup(item.subtype) || "NONE"; }
 function itemTypeLabel(item) {
@@ -113,6 +116,7 @@ function toAnnotationRecord(item) {
   return {
     kind: item.kind,
     text: item.text,
+    insertion: isInsertion(item) || undefined,
     start: item.start, end: item.end,
     suggested: item.suggested || "",
     category: SUBTYPE_TO_LEGACY[item.subtype] || "OTHER",   // legacy field (dashboard)
@@ -156,11 +160,15 @@ function markClass(item) {
 }
 function renderOriginalText(text) {
   const items = annotationItems.filter((i) => i.start != null && i.status !== "rejected")
-    .sort((a, b) => a.start - b.start || b.end - a.end);
+    .sort((a, b) => a.start - b.start || (a.end - a.start) - (b.end - b.start));
   let html = "", pos = 0;
   for (const it of items) {
     if (it.start < pos) continue;                   // nested/overlapping marks: first wins (cards still list all)
     html += escapeHtml(text.slice(pos, it.start));
+    if (isInsertion(it)) {                         // missing word: a caret between words (drawn by CSS, adds no text)
+      html += `<mark class="${markClass(it)} a-ins" data-annotation-id="${it.id}" title="Missing word${it.suggested ? `: ${escapeHtml(it.suggested)}` : ""}"></mark>`;
+      pos = it.start; continue;
+    }
     html += `<mark class="${markClass(it)}" data-annotation-id="${it.id}" title="${escapeHtml(itemTypeLabel(it))}">${escapeHtml(text.slice(it.start, it.end))}</mark>`;
     pos = it.end;
   }
@@ -169,11 +177,17 @@ function renderOriginalText(text) {
 function renderCorrectedText(text) {
   const apply = annotationItems.filter((i) => i.start != null && i.suggested != null &&
     (i.status === "accepted" || (previewPendingCorrections && i.status === "pending")))
-    .sort((a, b) => a.start - b.start);
+    .sort((a, b) => a.start - b.start || (a.end - a.start) - (b.end - b.start));
   let html = "", pos = 0;
   for (const it of apply) {
     if (it.start < pos) continue;
     html += escapeHtml(text.slice(pos, it.start));
+    if (isInsertion(it)) {
+      const pre = it.start > 0 && !/\s/.test(text[it.start - 1]) ? " " : "";
+      const post = it.start < text.length && !/\s/.test(text[it.start]) ? " " : "";
+      html += `${pre}<mark class="${markClass(it)} corrected a-ins-text" data-annotation-id="${it.id}" title="missing word added">${escapeHtml(it.suggested || "＋?")}</mark>${post}`;
+      pos = it.start; continue;
+    }
     const shown = it.suggested === "" ? "∅" : it.suggested;
     html += `<mark class="${markClass(it)} corrected" data-annotation-id="${it.id}" title="${escapeHtml(it.text)} → ${escapeHtml(it.suggested)}">${escapeHtml(shown)}</mark>`;
     pos = it.end;
@@ -218,8 +232,8 @@ function cardHtml(item, n) {
     ${item.stale ? '<div class="a-stale small">No longer in the text (edited in the transcript). Not saved.</div>' : ""}
     <div class="a-card-head">
       <span class="a-num">${n}</span>
-      <span class="tamil a-orig">${escapeHtml(item.text) || "<em>(insertion)</em>"}</span>
-      ${`<span class="a-arrow">→</span><input class="tamil a-sugg" data-a-sugg value="${escapeHtml(item.suggested || "")}" placeholder="correction" />`}
+      <span class="tamil a-orig">${item.text ? escapeHtml(item.text) : `<em class="a-ins-label">missing word${insertionContext(item)}</em>`}</span>
+      ${`<span class="a-arrow">→</span><input class="tamil a-sugg" data-a-sugg value="${escapeHtml(item.suggested || "")}" placeholder="${item.text ? "correction" : "word to add"}" />`}
       <span class="a-status">${statusLabel}</span>
     </div>
     <div class="a-card-meta">
@@ -240,8 +254,23 @@ function cardHtml(item, n) {
       <button type="button" data-a-edit>Edit</button>
       ${`<span class="a-reject-group"><button type="button" data-a-reject="not_error" title="The learner's form is correct">Not an error</button><button type="button" data-a-reject="ocr_error" title="Transcription mistake — fix it in Stage 3">OCR error</button></span>`}
       ${item.status !== "pending" ? '<button type="button" class="text-button" data-a-undo>Undo</button>' : ""}
+      ${item.sources.includes("manual") ? '<button type="button" class="text-button a-delete" data-a-delete title="Remove this card you added">Delete</button>' : ""}
     </div>
   </article>`;
+}
+
+function insertionContext(item) {
+  if (!isInsertion(item)) return "";
+  const text = annotationText();
+  const before = text.slice(0, item.start).trim().split(/\s+/).pop();
+  const after = text.slice(item.end).trim().split(/\s+/)[0];
+  if (before) return ` after <span class="tamil">${escapeHtml(before)}</span>`;
+  return after ? ` before <span class="tamil">${escapeHtml(after)}</span>` : "";
+}
+function acceptProblem(item) {
+  if (isInsertion(item) && !item.suggested) return "Type the missing word first.";
+  if (item.kind === "error" && item.text && item.suggested === item.text) return "The correction is the same as the learner's text. Type the corrected form (or clear the box if the word should be deleted).";
+  return "";
 }
 
 function renderAnnotationCards() {
@@ -256,8 +285,13 @@ function renderAnnotationCards() {
     b.classList.toggle("active", b.dataset.aFilter === annotationFilter);
     b.querySelector("span").textContent = counts[b.dataset.aFilter];
   });
+  const emptyMsg = !annotationItems.length
+    ? (errorDetectionRunning ? "Detection is running…" : "No cards yet. Select words on the left to add an error, or click between two words to add a missing word.")
+    : annotationFilter === "pending"
+      ? "✓ All cards reviewed. Open <b>All</b> or <b>Accepted</b> to look at them again."
+      : "Nothing in this filter.";
   target.innerHTML = visible.length ? visible.map((it, i) => cardHtml(it, i + 1)).join("")
-    : `<div class="empty">${annotationItems.length ? "Nothing in this filter." : "Run candidate detection, or select text on the left to annotate manually."}</div>`;
+    : `<div class="empty">${emptyMsg}</div>`;
 
   target.querySelectorAll("[data-annotation-card]").forEach((card) => {
     const item = annotationItems.find((i) => i.id === card.dataset.annotationCard);
@@ -274,7 +308,10 @@ function renderAnnotationCards() {
     card.querySelector("[data-a-type]")?.addEventListener("change", () => { read(); afterAnnotationChange(); });
     card.querySelector("[data-a-sugg]")?.addEventListener("change", () => { read(); afterAnnotationChange(false); });
     card.querySelector("[data-a-accept]").addEventListener("click", () => {
-      read(); item.status = "accepted"; item.origin = "learner_error";
+      read();
+      const problem = acceptProblem(item);
+      if (problem) { alert(problem); card.querySelector("[data-a-sugg]")?.focus(); return; }
+      item.status = "accepted"; item.origin = "learner_error";
       afterAnnotationChange(); selectNextPending(item.id);
     });
     card.querySelectorAll("[data-a-reject]").forEach((b) => b.addEventListener("click", () => {
@@ -288,6 +325,11 @@ function renderAnnotationCards() {
       (c?.querySelector("[data-a-sugg]") || c?.querySelector("[data-a-type]"))?.focus();
     });
     card.querySelector("[data-a-undo]")?.addEventListener("click", () => { item.status = "pending"; item.origin = null; afterAnnotationChange(); });
+    card.querySelector("[data-a-delete]")?.addEventListener("click", () => {
+      annotationItems = annotationItems.filter((x) => x.id !== item.id);
+      if (activeAnnotationId === item.id) activeAnnotationId = null;
+      afterAnnotationChange();
+    });
     card.querySelector("[data-a-next-occ]")?.addEventListener("click", () => {
       const k = item.occurrences.findIndex(([s]) => s === item.start);
       const [s, e] = item.occurrences[(k + 1) % item.occurrences.length];
@@ -312,6 +354,24 @@ function renderAnnotationTexts() {
 function relocateAnnotationItems(text) {
   let moved = 0, lost = 0;
   annotationItems.forEach((it) => {
+    if (!it.text && it.anchor) {                   // missing-word card: re-find the gap by the words around it
+      if (it.start != null && text.slice(Math.max(0, it.start - it.anchor.before.length), it.start) === it.anchor.before) { it.stale = false; return; }
+      // try the text around the gap, widest first: 24 chars before, 24 after, then just the word before / after
+      const wb = (it.anchor.before.trim().split(/\s+/).pop() || ""), wa = (it.anchor.after.trim().split(/\s+/)[0] || "");
+      let cands = [];
+      for (const [key, useEnd] of [[it.anchor.before, true], [it.anchor.after.trim() && it.anchor.after, false], [wb, true], [wa, false]]) {
+        if (!key || !key.trim()) continue;
+        // after the text before the gap → its end; before the text after the gap → its start (less a space)
+        cands = occurrencesOf(text, key).map(([s0, e]) => useEnd ? e : Math.max(0, s0 - (/\s/.test(text[s0 - 1] || "") ? 1 : 0)));
+        if (cands.length) break;
+      }
+      if (cands.length) {
+        const p = cands.sort((a, b) => Math.abs(a - (it.start ?? 0)) - Math.abs(b - (it.start ?? 0)))[0];
+        if (it.start != null && it.start !== p) moved++;
+        it.start = p; it.end = p; it.occurrences = [[p, p]]; it.stale = false;
+      } else { it.start = null; it.end = null; it.stale = true; lost++; }
+      return;
+    }
     if (it.start != null && text.slice(it.start, it.end) === it.text) { it.stale = false; return; }
     const occ = occurrencesOf(text, it.text);
     if (occ.length) {
@@ -327,7 +387,7 @@ function relocateAnnotationItems(text) {
 function renderStaleBanner(text) {
   const el = $("s4StaleBanner");
   if (!el) return;
-  const changed = annotationBaseText != null && annotationBaseText !== text;
+  const changed = annotationBaseText != null && annotationBaseText.trim() !== text.trim();
   const lost = annotationItems.filter((i) => i.stale).length;
   if (!changed && !lost) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.innerHTML = `<span><strong>The transcript was edited after detection ran.</strong>
@@ -338,11 +398,23 @@ function renderStaleBanner(text) {
   el.classList.remove("hidden");
 }
 
+function renderUnreviewedNote() {
+  const el = $("s4UnreviewedNote");
+  if (!el) return;
+  const n = importedTranscriptionReview
+    ? reviewLines().filter((l) => l?.review?.include_in_corpus !== false && l?.review?.status !== "CONFIRMED").length : 0;
+  el.classList.toggle("hidden", !n);
+  el.innerHTML = n ? `${n} line${n === 1 ? " is" : "s are"} still open in the transcription step. They are included here as currently read;
+    <button type="button" class="text-button" data-back-to-s3>finish them in step 3</button> if the reading is wrong.` : "";
+  el.querySelector("[data-back-to-s3]")?.addEventListener("click", () => goUploadStep(3));
+}
+
 function renderAnnotationWorkspace() {
   ensureAnnotationItems();
   const text = annotationText();
   relocateAnnotationItems(text);
   renderStaleBanner(text);
+  renderUnreviewedNote();
   const hidden = $("annotationSourceText");
   if (hidden) hidden.value = text;
   renderAnnotationTexts();
@@ -396,22 +468,64 @@ function selectionOffsetsIn(container) {
   const end = start + range.toString().length;
   return end > start ? { start, end, rect: range.getBoundingClientRect() } : null;
 }
+/* A click (no selection) between words: the gap nearest to the caret. */
+const TRAIL_PUNCT = /[.,!?;:”’"')\]]/;
+function caretGapIn(container) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!container.contains(range.startContainer)) return null;
+  const node = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  if (node?.closest("mark.a-mark")) return null;   // clicks on a marked word open its card
+  const pre = document.createRange();
+  pre.selectNodeContents(container);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const text = annotationText();
+  let p = pre.toString().length;
+  // snap to the nearest word boundary (the gap before or after the word the caret landed in)
+  const isW = (c) => c != null && WORD_CHAR.test(c);
+  if (isW(text[p - 1]) && isW(text[p])) {
+    let l = p, r = p;
+    while (isW(text[l - 1])) l--;
+    while (isW(text[r])) r++;
+    p = (p - l) <= (r - p) ? l : r;
+  }
+  // keep punctuation with its word: "வந்தான்.|" rather than "வந்தான்|."
+  while (p < text.length && TRAIL_PUNCT.test(text[p]) && !/\s/.test(text[p - 1] || " ")) p++;
+  return { start: p, end: p, rect: range.getBoundingClientRect() };
+}
+function placeTools(tools, box, rect) {
+  const host = box.closest(".s4-textcol").getBoundingClientRect();
+  tools.style.left = `${Math.max(0, rect.left - host.left)}px`;
+  tools.style.top = `${rect.bottom - host.top + 6}px`;
+  tools.classList.remove("hidden");
+}
 function showSelectionTools() {
   const box = $("s4Original");
   const tools = $("s4SelectionTools");
-  const off = box && selectionOffsetsIn(box);
-  if (!off) { tools?.classList.add("hidden"); return; }
+  if (!box || !tools) return;
+  const off = selectionOffsetsIn(box);
   const text = annotationText();
+  if (!off) {
+    const gap = caretGapIn(box);
+    if (!gap || !text) { tools.classList.add("hidden"); return; }
+    tools.dataset.start = gap.start; tools.dataset.end = gap.end; tools.dataset.mode = "gap";
+    const before = text.slice(0, gap.start).trim().split(/\s+/).pop() || "";
+    tools.querySelector(".s4-sel-text").textContent = before ? `after “${before.slice(0, 24)}”` : "at the start";
+    $("s4AddError").classList.add("hidden");
+    $("s4AddMissing").textContent = "+ Missing word here";
+    placeTools(tools, box, gap.rect);
+    return;
+  }
   // trim surrounding whitespace from the selection
   let { start, end } = off;
   while (start < end && /\s/.test(text[start])) start++;
   while (end > start && /\s/.test(text[end - 1])) end--;
-  tools.dataset.start = start; tools.dataset.end = end;
+  tools.dataset.start = start; tools.dataset.end = end; tools.dataset.mode = "range";
+  $("s4AddError").classList.remove("hidden");
+  $("s4AddMissing").textContent = "+ Missing word after";
   tools.querySelector(".s4-sel-text").textContent = text.slice(start, end).slice(0, 40);
-  const host = box.closest(".s4-textcol").getBoundingClientRect();
-  tools.style.left = `${Math.max(0, off.rect.left - host.left)}px`;
-  tools.style.top = `${off.rect.bottom - host.top + 6}px`;
-  tools.classList.remove("hidden");
+  placeTools(tools, box, off.rect);
 }
 function addManualItem(kind = "error") {
   const tools = $("s4SelectionTools");
@@ -424,7 +538,7 @@ function addManualItem(kind = "error") {
   annotationItems.push(item);
   tools.classList.add("hidden");
   window.getSelection()?.removeAllRanges();
-  annotationFilter = "all";
+  if (annotationFilter !== "all") annotationFilter = "pending";
   afterAnnotationChange();
   selectAnnotation(item.id);
   requestAnimationFrame(() => {
@@ -433,19 +547,50 @@ function addManualItem(kind = "error") {
   });
 }
 
+function addMissingWord() {
+  const tools = $("s4SelectionTools");
+  const text = annotationText();
+  let p = Number(tools.dataset.mode === "gap" ? tools.dataset.start : tools.dataset.end);
+  while (p < text.length && TRAIL_PUNCT.test(text[p]) && !/\s/.test(text[p - 1] || " ")) p++;
+  const item = { id: newItemId(), kind: "error", status: "pending", origin: null, start: p, end: p,
+    occurrences: [[p, p]], text: "", suggested: "", subtype: "MISSING",
+    anchor: { before: text.slice(Math.max(0, p - 24), p), after: text.slice(p, p + 24) },
+    note: "", sources: ["manual"], evidence: [] };
+  annotationItems.push(item);
+  tools.classList.add("hidden");
+  window.getSelection()?.removeAllRanges();
+  if (annotationFilter !== "all") annotationFilter = "pending";
+  afterAnnotationChange();
+  selectAnnotation(item.id);
+  requestAnimationFrame(() => document.querySelector(`[data-annotation-card="${item.id}"] [data-a-sugg]`)?.focus());
+}
+
+/* Detection runs by itself when the annotator arrives at this step: the first time, and again after the
+   transcript has changed (accepted/rejected decisions and manual cards are kept). */
+function maybeAutoDetect() {
+  if (errorDetectionRunning || !ocrApiUrl()) return;
+  const text = annotationText();
+  if (!text) return;
+  const never = annotationBaseText == null && !annotationItems.some((i) => !i.sources.includes("manual"));
+  const changed = annotationBaseText != null && annotationBaseText.trim() !== text.trim();
+  if (never || changed) runErrorDetection({ auto: true });
+}
+
 /* ---------- detection ---------- */
-async function runErrorDetection() {
+async function runErrorDetection(opts = {}) {
+  const auto = opts && opts.auto === true;          // (from a click, opts is the click event)
   if (errorDetectionRunning) return;
   const text = annotationText().trim();
-  if (!text) { alert("No verified learner text is available."); return; }
+  if (!text) { if (!auto) alert("No verified learner text is available."); return; }
   const base = ocrApiUrl();
-  if (!base) { alert("Backend is not configured."); return; }
-  if (annotationItems.some((i) => i.status !== "pending") &&
+  if (!base) { if (!auto) alert("Backend is not configured."); return; }
+  if (!auto && annotationItems.some((i) => i.status !== "pending") &&
       !confirm("Re-running detection keeps your accepted/rejected decisions and manual items, and replaces pending suggestions. Continue?")) return;
 
   errorDetectionRunning = true;
   $("runErrorDetectionBtn").disabled = true;
-  $("errorDetectionStatus").textContent = "Checking: Tamil rules, dictionary, morphology, TamilVU, MuRIL → Sarvam verifies… (up to 2 minutes)";
+  $("errorDetectionStatus").textContent = `${auto ? "Checking automatically" : "Checking"}: Tamil rules, dictionary, morphology, TamilVU, MuRIL → Sarvam verifies… (about a minute). You can add your own cards meanwhile.`;
+  renderAnnotationCards();
   $("annotationStatus").textContent = "Detecting…";
   try {
     const response = await fetch(`${base}/api/detect-errors`, {
@@ -482,6 +627,7 @@ async function runErrorDetection() {
   } finally {
     errorDetectionRunning = false;
     $("runErrorDetectionBtn").disabled = false;
+    $("runErrorDetectionBtn").textContent = annotationBaseText != null ? "Re-run detection" : "Run error detection";
   }
 }
 
@@ -507,8 +653,12 @@ async function runDiscovery() {
       .filter((n) => !annotationItems.some((k) => k.start != null && n.start != null && n.start < k.end && n.end > k.start));
     annotationItems = annotationItems.concat(fresh);
     annotationBaseText = annotationBaseText || text;
-    const ok = Object.entries(payload?.engines || {}).filter(([, i]) => i.ok).map(([n]) => ENGINE_LABELS[n] || n);
-    $("errorDetectionStatus").textContent = `AI suggestions: ${fresh.length} new “possible” card(s)${ok.length ? ` from ${ok.join(" + ")}` : " — AI unavailable"}.`;
+    const eng = Object.entries(payload?.engines || {});
+    const ok = eng.filter(([, i]) => i.ok).map(([n]) => ENGINE_LABELS[n] || n);
+    const bad = eng.filter(([, i]) => !i.ok).map(([n]) => ENGINE_LABELS[n] || n);
+    const found = (payload?.candidates || []).length;
+    $("errorDetectionStatus").textContent = `AI suggestions (${ok.join(" + ") || "no AI available"}): ${found} found, ${fresh.length} new “possible” card(s)`
+      + `${found > fresh.length ? ` — ${found - fresh.length} already had a card` : ""}${bad.length ? ` · ${bad.join(", ")} did not answer` : ""}.`;
     renderAnnotationWorkspace();
     scheduleDraftAutosave();
   } catch (error) {
@@ -531,4 +681,5 @@ function wireStage4() {
     if (!ev.target.closest("#s4SelectionTools, #s4Original")) $("s4SelectionTools")?.classList.add("hidden");
   });
   $("s4AddError")?.addEventListener("click", () => addManualItem("error"));
+  $("s4AddMissing")?.addEventListener("click", addMissingWord);
 }

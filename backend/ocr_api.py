@@ -1418,21 +1418,49 @@ def detect_errors_gemini(text: str, level: str = "", task: str = ""):
         "required": ["candidates"],
     }
 
+    # Gemini 2.5 counts its internal "thinking" against max_output_tokens: with the old 1,800 limit the
+    # thinking used most of it and the JSON reply was cut off mid-way ("Unterminated string"), so only
+    # Sarvam's suggestions ever reached the annotator. Thinking is switched off (not needed for this
+    # listing task), the limit is raised, and a cut-off reply is salvaged item by item.
+    cfg = dict(temperature=0.1, max_output_tokens=8192, response_mime_type="application/json",
+               response_schema=gemini_schema)
+    if hasattr(genai_types, "ThinkingConfig") and "flash" in model:
+        cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=0)
     response = client.models.generate_content(
         model=model,
         contents=error_detection_prompt(text, level, task),
-        config=genai_types.GenerateContentConfig(
-            temperature=0.1,
-            max_output_tokens=1800,
-            response_mime_type="application/json",
-            response_schema=gemini_schema,
-        ),
+        config=genai_types.GenerateContentConfig(**cfg),
     )
-    parsed = json.loads(response.text or '{"candidates":[]}')
-    return [
-        c for item in parsed.get("candidates", [])
-        if (c := clean_error_candidate(item, "gemini"))
-    ]
+    items = parse_candidates_tolerant(response.text or "")
+    return [c for item in items if (c := clean_error_candidate(item, "gemini"))]
+
+
+def parse_candidates_tolerant(raw: str):
+    """Parse {"candidates":[...]} JSON; if the reply was cut off, keep every complete item before the cut."""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        return json.loads(raw).get("candidates", []) or []
+    except Exception:
+        pass
+    out = []
+    dec = json.JSONDecoder()
+    i = raw.find("[")
+    while i != -1 and i < len(raw):
+        j = raw.find("{", i)
+        if j == -1:
+            break
+        try:
+            obj, end = dec.raw_decode(raw, j)
+        except Exception:
+            break
+        if isinstance(obj, dict):
+            out.append(obj)
+        i = end
+    if not out:
+        raise ValueError("Gemini reply could not be read as JSON")
+    return out
 
 
 def normalise_candidate_span(value: str):
@@ -1570,7 +1598,7 @@ def merge_error_candidates(*groups):
 def health():
     return {
         "ok": True,
-        "version": "0.19.0",
+        "version": "0.20.0",
         "tamil_detection": _detection_status(),
         "sarvam_configured": bool(os.getenv("SARVAM_API_KEY")),
         "google_vision": "application_default_credentials",
@@ -1629,14 +1657,17 @@ async def detect_errors(payload: dict = Body(...)):
 
     engines = {}
     if mode == "discovery":
+        import asyncio
         found = []
-        for name, fn in (("sarvam", detect_errors_sarvam), ("gemini", detect_errors_gemini)):
-            try:
-                got = await run_in_threadpool(fn, text, level, task)
+        pairs = (("sarvam", detect_errors_sarvam), ("gemini", detect_errors_gemini))
+        results = await asyncio.gather(*(run_in_threadpool(fn, text, level, task) for _, fn in pairs),
+                                       return_exceptions=True)       # both models asked at the same time
+        for (name, _), got in zip(pairs, results):
+            if isinstance(got, Exception):
+                engines[name] = {"ok": False, "error": str(got)[:300], "role": "discovery"}
+            else:
                 engines[name] = {"ok": True, "count": len(got), "role": "discovery"}
                 found.append(got)
-            except Exception as exc:
-                engines[name] = {"ok": False, "error": str(exc)[:300], "role": "discovery"}
         candidates = [assign_tag(c) for c in merge_error_candidates(*found)] if found else []
         for c in candidates:
             c["tier"] = "possible"

@@ -363,6 +363,10 @@ function annotatedTextHtml(d) {
   spans.forEach(({ a, pos }) => {
     if (pos[0] < at) return;
     html += escapeHtml(text.slice(at, pos[0]));
+    if (pos[0] === pos[1]) {   // missing word: show the added word in small type at the gap
+      html += `<mark class="a-mark g-${annGroup(a).toLowerCase()} a-ins-view" title="missing word → ${escapeHtml(a.suggested || "")}">‸${escapeHtml(a.suggested || "")}</mark>`;
+      at = pos[1]; return;
+    }
     html += `<mark class="a-mark g-${annGroup(a).toLowerCase()}" title="${escapeHtml(TAMIL_SUBTYPES[annSubtype(a)]?.ta || "")} → ${escapeHtml(a.suggested || "")}">${escapeHtml(text.slice(pos[0], pos[1]))}</mark>`;
     at = pos[1];
   });

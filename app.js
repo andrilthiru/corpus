@@ -1453,7 +1453,9 @@ function consolidatedVerifiedText() {
   const out = [];
   for (let p = 1; p <= pages; p++) {
     const text = pageLines(p)
-      .filter((line) => line?.review?.include_in_corpus !== false && line?.review?.status === "CONFIRMED")
+      // every included line, in its current (edited) form. Lines still awaiting review in Stage 3 are
+      // included too — dropping them made edits on those lines "disappear" from Stage 4.
+      .filter((line) => line?.review?.include_in_corpus !== false)
       .map(reviewLineText)
       .filter(Boolean)
       .join("\n");
@@ -1524,7 +1526,7 @@ function goUploadStep(step) {
       ?.scrollIntoView({ block: "start", behavior: restoringDraft ? "auto" : "smooth" }));
   }
   if (uploadCurrentStep === 3) renderStructuredReview();
-  if (uploadCurrentStep === 4) renderAnnotationWorkspace();
+  if (uploadCurrentStep === 4) { renderAnnotationWorkspace(); maybeAutoDetect(); }
   if (uploadCurrentStep === 5) {
     $("recordSaveView").classList.remove("hidden");
     $("recordSavedView").classList.add("hidden");
@@ -2378,6 +2380,7 @@ function resetUploadWorkflow({ clearSaved = true, keepContext = false } = {}) {
   activeReviewLineId = null;
   errorCandidates = [];
   annotationItems = [];
+  annotationFilter = "pending";
   activeIssueId = null;
   activeAnnotationId = null;
   resetOcrPageProgress();

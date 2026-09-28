@@ -1761,3 +1761,15 @@ b.good { color: #1f5c40; } b.bad { color: var(--g-ilakkanam); }
 .t-edit-actions { flex-wrap: wrap; align-items: center; }
 .t-edit-actions button { padding: 7px 12px; font-size: 13px; }
 .t-type-status { color: var(--muted); }
+
+/* v0.20 — missing-word caret, delete, open-lines note */
+mark.a-mark.a-ins { display: inline-block; width: 0; position: relative; padding: 0; background: none; box-shadow: none; vertical-align: baseline; }
+mark.a-mark.a-ins::before { content: "‸"; position: absolute; left: -6px; bottom: -0.55em; font-size: 1.25em; font-weight: 700; color: var(--c); line-height: 1; }
+mark.a-mark.a-ins.s-pending::before { opacity: .85; }
+mark.a-mark.a-ins.active::before { outline: 2px solid var(--c); border-radius: 3px; }
+mark.a-mark.a-ins-text { text-decoration: underline wavy var(--c); text-underline-offset: 4px; }
+.a-ins-label { font-style: normal; color: #6b7280; font-size: 14px; }
+.a-actions .a-delete { color: #b91c1c; margin-left: auto; }
+.s4-unreviewed { padding: 8px 12px; margin: 0 0 10px; border-radius: 10px; background: #f1f5f9; border: 1px solid #dbe3ec; color: #334155; }
+.s4-unreviewed .text-button { padding: 0; font-size: inherit; }
+mark.a-mark.a-ins-view { font-size: .8em; vertical-align: super; background: var(--bg); padding: 0 3px; }

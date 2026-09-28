@@ -387,9 +387,10 @@
         <div class="annotation-ai-toolbar s4-toolbar">
           <button id="runErrorDetectionBtn" type="button" class="primary-btn">Run error detection</button>
           <button id="runDiscoveryBtn" type="button" title="Open-ended AI search for errors the Tamil checks may miss (word choice, missing words). Lower confidence — review each one.">Ask AI for more (possible errors)</button>
-          <span id="errorDetectionStatus" class="small">No automatic scan run yet.</span>
+          <span id="errorDetectionStatus" class="small">Detection runs automatically when you open this step.</span>
         </div>
         <div id="s4StaleBanner" class="s4-stale hidden"></div>
+        <div id="s4UnreviewedNote" class="s4-unreviewed small hidden"></div>
         <div class="s4-legend small" aria-label="Colour key">
           <span class="lg-title">Colour key</span>
           <span class="lg g-ezhuthu">எழுத்தியல்</span><span class="lg g-sol">சொல்லியல்</span>
@@ -402,7 +403,7 @@
           <section class="s4-textcol">
             <div class="s4-textpair">
               <div class="s4-textbox">
-                <header><strong>Original learner text</strong><span class="small">select words to annotate</span></header>
+                <header><strong>Original learner text</strong><span class="small">select words to mark an error · click between words to add a missing word</span></header>
                 <div id="s4Original" class="tamil s4-body"></div>
               </div>
               <div class="s4-textbox">
@@ -414,13 +415,14 @@
             <div id="s4SelectionTools" class="s4-seltools hidden">
               <span class="tamil s4-sel-text"></span>
               <button id="s4AddError" type="button" class="primary-btn">+ Add error</button>
+              <button id="s4AddMissing" type="button">+ Missing word after</button>
             </div>
           </section>
 
           <aside class="s4-cardcol">
             <div class="s4-filters seg">
-              <button type="button" data-a-filter="all" class="active">All <span>0</span></button>
-              <button type="button" data-a-filter="pending">Pending <span>0</span></button>
+              <button type="button" data-a-filter="pending" class="active" title="Cards still to review. Reviewed cards leave this list.">To review <span>0</span></button>
+              <button type="button" data-a-filter="all">All <span>0</span></button>
               <button type="button" data-a-filter="accepted">Accepted <span>0</span></button>
               <button type="button" data-a-filter="rejected">Rejected <span>0</span></button>
             </div>
