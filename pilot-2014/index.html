@@ -30,7 +30,7 @@ th{background:#eef2f7;position:sticky;top:0;cursor:pointer;font-size:13px}tr:hov
 .code{font-weight:600;color:var(--acc);white-space:nowrap}.muted{color:var(--muted)}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}.stat .big{color:var(--acc)}
-.bar{display:grid;grid-template-columns:230px 1fr 50px;gap:10px;align-items:center;margin:6px 0;font-size:14px}.bar i{display:block;height:14px;border-radius:4px;background:var(--c)}
+.bar{display:grid;grid-template-columns:300px 1fr 50px;gap:10px;align-items:center;margin:6px 0;font-size:14px}.bar i{display:block;height:14px;border-radius:4px;background:var(--c)}
 @media(max-width:600px){.bar{grid-template-columns:130px 1fr 40px}}
 ul.plan li{margin:6px 0;line-height:1.6}
 footer{color:var(--muted);font-size:13px;padding:10px 0 30px}
@@ -39,7 +39,7 @@ footer{color:var(--muted);font-size:13px;padding:10px 0 30px}
 <header><div class="wrap">
 <h1>Singapore Tamil Corpus <span class="ta">· சிங்கப்பூர்த் தமிழ்த் தரவகம்</span></h1>
 <div class="sub">Pilot corpus, 2014 — annotated sample</div>
-<nav id="nav"><button data-p="text" class="on">Annotated text</button><button data-p="words">Word list</button><button data-p="tags">Tag scheme</button><button data-p="stats">Statistics</button><button data-p="about">Plan &amp; source</button></nav>
+<nav id="nav"><button data-p="text" class="on">Annotated text</button><button data-p="words">Word list</button><button data-p="tags">Code reference</button><button data-p="stats">Statistics</button><button data-p="about">Plan &amp; source</button></nav>
 </div></header>
 <main class="wrap">
 <div class="prov"><b>About this sample.</b> The data — sample text, 18-category grammatical tag scheme and the tagged word list — is from a 2014 corpus pilot by Dr K Thirumaran, shown unchanged (including the original spellings). The pilot planned a simple word / grammatical label / root viewer; this interactive version of that viewer was built in October 2026 so the 2014 data can be explored. It is a general Singapore Tamil corpus with grammatical annotation, not a learner error corpus.</div>
@@ -51,13 +51,15 @@ footer{color:var(--muted);font-size:13px;padding:10px 0 30px}
 
 <section class="panel" id="p-words"><div class="card">
  <div class="tools"><input id="q" class="ta" placeholder="Search a Tamil word or root…"><select id="tf" class="ta"></select></div>
- <div class="muted" id="wcount" style="margin-bottom:8px;font-size:13px"></div>
+ <div class="muted" style="margin-bottom:8px;font-size:13px"><span id="wcount"></span> · <a href="#" id="toCodes">What do the codes mean?</a></div>
  <div class="scr"><table><thead><tr><th data-s="w">சொல் · Word</th><th data-s="tag">Tag</th><th data-s="name">Category</th><th data-s="parts">மூலம் / பகுப்பு · Root &amp; parts</th><th data-s="f">In text</th></tr></thead><tbody id="wt"></tbody></table></div>
 </div></section>
 
-<section class="panel" id="p-tags"><div class="card"><h3 style="margin-top:0">Grammatical tag scheme (2014)</h3>
- <table><thead><tr><th>No.</th><th>இலக்கணக் குறிப்பு</th><th>Grammatical category</th><th>Code</th><th>Words tagged</th></tr></thead><tbody id="tt"></tbody></table>
- <div class="muted" id="extra" style="margin-top:10px;font-size:13px"></div></div></section>
+<section class="panel" id="p-tags"><div class="card"><h3 style="margin-top:0">Code reference — what each short code means</h3>
+ <p class="muted" style="margin-top:0;line-height:1.6">Every short code used in the word list, with its full Tamil name, English name and examples from the text. Codes are built from parts of the full name, for example
+ <span class="ta"><b>பெ</b> = பெயர், <b>வி</b> = வினை, <b>எ / எச்</b> = எச்சம், <b>மு</b> = முற்று, <b>கு</b> = குறிப்பு, <b>எதி.ம</b> = எதிர்மறை, <b>அ</b> = அடை, <b>தொ</b> = தொழில், <b>பதி</b> = பதிலிடு, <b>இ.சொல்</b> = இடைச்சொல்</span>.</p>
+ <div class="scr" style="max-height:none"><table><thead><tr><th>Code</th><th>முழுப் பெயர் · Full Tamil name</th><th>English</th><th>Examples from the text</th><th>Words</th></tr></thead><tbody id="tt"></tbody></table></div>
+ <div class="muted" style="margin-top:10px;font-size:13px;line-height:1.6">* Explanation added in 2026: the code is used in the 2014 word list but its name was not in the 2014 tag table (or, for இ.சொல், the table gave no English name).<br>Codes in the 2014 tag table that do not appear in this sample text are listed at the end.</div></div></section>
 
 <section class="panel" id="p-stats"><div class="stats" id="st"></div><div class="card"><h3 style="margin-top:0">Words per grammatical category</h3><div id="bars"></div></div></section>
 
@@ -70,10 +72,14 @@ const D={"title": "தமிழ்மொழி விழா", "paras": ["சி�
 const norm=t=>t.replace(/\s+/g,'');
 const scheme={};D.tags.forEach(t=>scheme[t[3]]={n:t[0],ta:t[1],en:t[2]});
 const canon=c=>D.alias[c]||c;
+const EXTRA={'கு.வி.மு':{ta:'குறிப்பு வினைமுற்று',en:'Appellative finite verb'},'எதி.ம.கு.வி.எ':{ta:'எதிர்மறைக் குறிப்பு வினையெச்சம்',en:'Negative appellative verbal participle'},
+ 'ஈ.எதி.ம.பெ.எச்':{ta:'ஈறுகெட்ட எதிர்மறைப் பெயரெச்சம்',en:'Negative relative participle (ending dropped)'},'வினாச்சொல்':{ta:'வினாச்சொல்',en:'Interrogative word'}};
+const ENFILL={'இ.சொல்':'Particle'};
+const info=c=>{c=canon(c);const s=scheme[c];if(s)return {ta:s.ta,en:s.en||ENFILL[c]||'',added:!s.en&&!!ENFILL[c]};const x=EXTRA[c];return x?{ta:x.ta,en:x.en,added:true,extra:true}:null};
 const GROUP={'பெ':'N','பதி.பெ':'N','தொ.பெ':'N','வி.அ.பெ':'N','வி':'V','வி.மு':'V','கு.வி.மு':'V','வியங்':'V','பெ.எ':'P','வி.எ':'P','கு.பெ.எச்':'P','கு.வி.எச்':'P','எதி.ம.பெ.எச்':'P','எதி.ம.வி.எச்':'P','எதி.ம.கு.வி.எ':'P','ஈ.எதி.ம.பெ.எச்':'P','பெ.அ':'M','வி.அ':'M','அ.தொ':'M'};
 const grp=c=>GROUP[canon(c)]||'X';
 const GN={N:'Nouns & pronouns',V:'Verbs',P:'Participles',M:'Adjectives & adverbs',X:'Particles & others'};
-const name=c=>{const s=scheme[canon(c)];return s?`${s.ta} · ${s.en||''}`.replace(/ · $/,''):'(code not in the 2014 tag table)'};
+const name=c=>{const i=info(c);return i?`${i.ta} · ${i.en}`.replace(/ · $/,''):'(code not explained)'};
 const E={};D.entries.forEach(e=>{if(!E[e.w])E[e.w]=e});
 const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // tokenise text
@@ -94,17 +100,19 @@ function renderWords(){const q=norm(document.getElementById('q').value);const t=
  const r=rows.filter(x=>(!t||canon(x.tag)===t)&&(!q||norm(x.w).includes(q)||norm(x.parts).includes(q))).sort((a,b)=>(a[sortK]>b[sortK]?1:a[sortK]<b[sortK]?-1:0)*dir);
  document.getElementById('wcount').textContent=`${r.length} of ${rows.length} words`;
  document.getElementById('wt').innerHTML=r.map(x=>`<tr><td class="ta"><b>${esc(x.w)}</b></td><td class="code ta">${esc(x.tag)}</td><td class="ta">${esc(x.name)}</td><td class="ta">${esc(x.parts||'')}</td><td>${x.f}</td></tr>`).join('')}
+document.getElementById('toCodes').addEventListener('click',e=>{e.preventDefault();document.querySelector('#nav [data-p=tags]').click()});
 document.getElementById('q').addEventListener('input',renderWords);tf.addEventListener('change',renderWords);
 document.querySelectorAll('th[data-s]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.s;dir=sortK===k?-dir:1;sortK=k;renderWords()}));renderWords();
 // tags
 const cnt={};rows.forEach(r=>{const c=canon(r.tag);cnt[c]=(cnt[c]||0)+1});
-document.getElementById('tt').innerHTML=D.tags.map(t=>`<tr><td>${t[0]}</td><td class="ta">${esc(t[1])}</td><td>${esc(t[2])}</td><td class="code ta">${esc(t[3])}</td><td>${cnt[t[3]]||0}</td></tr>`).join('');
-const extra=Object.keys(cnt).filter(c=>!scheme[c]);document.getElementById('extra').innerHTML=extra.length?`Also used in the 2014 word list but not in the tag table: <span class="ta">${extra.map(c=>`${esc(c)} (${cnt[c]})`).join(', ')}</span>.`:'';
+const used=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([c])=>c);const unused=D.tags.map(t=>t[3]).filter(c=>!cnt[c]);
+const ex=c=>rows.filter(r=>canon(r.tag)===c).sort((a,b)=>b.f-a.f).slice(0,4).map(r=>r.w).join(', ');
+document.getElementById('tt').innerHTML=[...used,...unused].map(c=>{const i=info(c)||{ta:'',en:''};const aka=Object.keys(D.alias).filter(k=>D.alias[k]===c);return `<tr${cnt[c]?'':' style="opacity:.6"'}><td class="code ta">${esc(c)}${i.added?' *':''}${aka.length?`<div class="muted" style="font-weight:400;font-size:12px">also written ${esc(aka.join(', '))}</div>`:''}</td><td class="ta">${esc(i.ta)}</td><td>${esc(i.en)}</td><td class="ta">${esc(ex(c))||'<span class="muted">not in this text</span>'}</td><td>${cnt[c]||0}</td></tr>`}).join('');
 // stats
 const ann=toks.filter(t=>E[t.w]).length;
 document.getElementById('st').innerHTML=[[toks.length,'running words in the text'],[new Set(toks.map(t=>t.w)).size,'different word forms'],[rows.length,'tagged words in the list'],[Math.round(100*ann/toks.length)+'%','of running words tagged'],[D.tags.length,'categories in the tag scheme']].map(([n,l])=>`<div class="stat"><div class="big">${n}</div><div class="muted">${l}</div></div>`).join('');
 const max=Math.max(...Object.values(cnt));
-document.getElementById('bars').innerHTML=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<div class="bar g${grp(c)}"><span class="ta" title="${esc(name(c))}">${esc(c)} <span class="muted">${esc((scheme[c]||{}).en||'')}</span></span><i style="width:${100*n/max}%"></i><b>${n}</b></div>`).join('');
+document.getElementById('bars').innerHTML=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<div class="bar g${grp(c)}"><span class="ta" title="${esc(name(c))}"><b>${esc(c)}</b> <span class="muted">${esc((info(c)||{}).ta||'')}</span></span><i style="width:${100*n/max}%"></i><b>${n}</b></div>`).join('');
 // plan
 document.getElementById('plan').innerHTML=D.plan.map(l=>l.startsWith('-')?`<li>${esc(l.replace(/^-\s*/,''))}</li>`:`<div style="font-weight:700;margin-top:10px">${esc(l)}</div>`).join('');
 // tabs
