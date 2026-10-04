@@ -90,7 +90,8 @@ const html=paras.map((p,pi)=>p.replace(/[஀-௿]+/g,(m)=>{const e=E[m];toks.pus
 document.getElementById('text').innerHTML=html;
 document.getElementById('key').innerHTML=Object.entries(GN).map(([k,v])=>`<span class="g${k}">${v}</span>`).join('');
 const freq={};toks.forEach(t=>freq[t.w]=(freq[t.w]||0)+1);
-function kwic(w){const out=[];paras.forEach(p=>{let re=new RegExp('(^|[^\\u0B80-\\u0BFF])('+w+')(?![\\u0B80-\\u0BFF])','g'),m;while((m=re.exec(p))){const s=m.index+m[1].length;out.push(`…${esc(p.slice(Math.max(0,s-40),s))}<b>${w}</b>${esc(p.slice(s+w.length,s+w.length+40))}…`)}});return out}
+function kwic(w){const out=[];paras.forEach(p=>{let re=new RegExp('(^|[^\\u0B80-\\u0BFF])('+w+')(?![\\u0B80-\\u0BFF])','g'),m;while((m=re.exec(p))){const s=m.index+m[1].length;const L=p.slice(0,s).split(/\s+/),R=p.slice(s+w.length).split(/\s+/);const lw=L.slice(-6).join(' '),rw=R.slice(0,7).join(' ');
+out.push(`${L.length>6?'… ':''}${esc(lw)}<b>${w}</b>${esc(rw)}${R.length>7?' …':''}`)}});return out}
 function show(w){const e=E[w];document.querySelectorAll('.w.sel').forEach(x=>x.classList.remove('sel'));document.querySelectorAll(`.w[data-w="${CSS.escape(w)}"]`).forEach(x=>x.classList.add('sel'));
  const k=kwic(w);document.getElementById('side').innerHTML=`<div class="big ta">${esc(w)}</div><div class="lbl">Grammatical tag</div><div class="ta"><span class="code">${esc(e.tag)}</span> — ${esc(name(e.tag))}</div><div class="lbl">Root &amp; parts</div><div class="ta">${esc(e.parts||'—')}</div><div class="lbl">Occurrences in the text · ${k.length}</div>${k.map(x=>`<div class="kwic ta">${x}</div>`).join('')}`}
 document.getElementById('text').addEventListener('click',ev=>{const s=ev.target.closest('.w');if(s)show(s.dataset.w)});
